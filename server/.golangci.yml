@@ -1,0 +1,66 @@
+# golangci-lint v2 系の設定形式。
+# v1 を使う場合は linters.settings ではなくトップレベルの settings に置く。
+#
+# ★ github.com/kotarowakuwaku/asset-wish/server を実際の module パス（go.mod の module 行）に置換すること。
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - depguard      # レイヤ境界の強制。このプロジェクトの要
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+
+  settings:
+    depguard:
+      rules:
+        # domain 層は外部依存ゼロ。
+        # ここが落ちたら設定を緩めるのではなく、設計のほうを直すこと。
+        domain:
+          files:
+            - "**/internal/domain/**"
+          deny:
+            - pkg: "database/sql"
+              desc: "domain は永続化を知らない。リポジトリ経由で扱うこと"
+            - pkg: "net/http"
+              desc: "domain は HTTP を知らない。handler の責務"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/adapter"
+              desc: "依存の向きが逆。adapter → usecase → domain の順を守ること"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/infra"
+              desc: "domain はインフラを知らない"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/db"
+              desc: "sqlc 生成コードを domain に持ち込まない。変換は adapter/repository の責務"
+
+        # usecase 層は adapter / infra の実装を知らない。
+        # インターフェースは usecase 側に定義する（依存性逆転）。
+        usecase:
+          files:
+            - "**/internal/usecase/**"
+          deny:
+            - pkg: "net/http"
+              desc: "usecase は HTTP を知らない"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/adapter"
+              desc: "usecase はインターフェースにのみ依存する。実装を import しない"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/infra"
+              desc: "usecase はインフラを知らない"
+
+  exclusions:
+    rules:
+      # テストでは fake の都合上ゆるめる
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

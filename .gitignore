@@ -1,0 +1,46 @@
+# --- 秘密情報 ---
+# 一度履歴に入ると除去が非常に面倒なので、最初に置いておくこと
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# --- Terraform ---
+# state には接続文字列やトークンが平文で入りうる。絶対にコミットしない
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+
+# --- Go ---
+/server/bin/
+/server/tmp/
+*.test
+*.out
+coverage.*
+
+# --- Node / Expo ---
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# --- エディタ・OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
