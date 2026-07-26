@@ -62,17 +62,24 @@ ssh -T git@github-personal
 
 ```
 [user]
-  name = Kotaro
-  email = 個人のメールアドレス
+  name = kotarowakuwaku
+  email = 103411974+kotarowakuwaku@users.noreply.github.com
 ```
 
 **末尾のスラッシュは必須**（配下すべてに適用する意味）。
+
+**メールアドレスには GitHub の noreply アドレスを使う。** このリポジトリは public であり、コミットの Author はそのまま公開される。実アドレスを入れると `git log` から誰でも読める。noreply でも GitHub 上の紐付け（コントリビューショングラフ、アバター表示）は正しく働く。
+
+自分の noreply アドレスは GitHub の Settings → Emails で確認できる（`<ID>+<ユーザー名>@users.noreply.github.com` の形式）。同じ画面で以下も有効にしておく。
+
+- **Keep my email addresses private**
+- **Block command line pushes that expose my email** — 実アドレスでコミットした場合に push 自体を止めてくれる。事故を後から履歴書き換えで直すのは高くつくので、入口で止める
 
 ---
 
 ## 2. GitHub でリポジトリを作る
 
-個人アカウントで、**Private** で作成する。
+個人アカウントで、**Public** で作成する。
 
 - リポジトリ名：任意（例 `asset-wish`）
 - README、.gitignore、ライセンス：**いずれも追加しない**（こちらで用意したものを置くため）
@@ -82,8 +89,30 @@ ssh -T git@github-personal
 ```bash
 gh auth status          # どのアカウントがアクティブか確認
 gh auth switch          # 違っていれば切り替え
-gh repo create asset-wish --private
+gh repo create asset-wish --public
 ```
+
+### なぜ public か
+
+**GitHub Actions の実行時間が無制限で無料になる。** private だと Free プランは月2,000分で、しかもジョブごとに分単位で切り上げられる。このプロジェクトは AI エージェントにループを回させる前提であり、CI を回す回数が読めない。分数を気にしながら検証を削るのは本末転倒なので、public を選ぶ。
+
+副次的に、**secret scanning と push protection が無料で使える**（有効化は後述）。
+
+### public であることの代償
+
+**秘密情報の事故が即座に致命的になる。** private なら気付いて消せば済むが、public リポジトリは bot が数秒でスクレイプする。このアプリは最終的に自分の資産額を扱い、認証は環境変数の固定トークン1本（設計書 4.5）なので、**それが1度でも漏れたら他人に資産を読まれる。**
+
+そのため、以下を必ず有効にする。
+
+```bash
+gh api -X PATCH repos/<自分のアカウント>/asset-wish \
+  -f 'security_and_analysis[secret_scanning][status]=enabled' \
+  -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
+```
+
+**push protection が本命。** 検出ではなく、そもそも push させない。`.gitignore` は「うっかり `git add .` した」を防げないが、これは防げる。
+
+コードとドキュメントには実データを一切置かない。金額も口座名も人名も、すべて DB 側にある。この境界を崩さない限り、public であることのリスクは秘密情報の事故だけに閉じる。
 
 ## 3. ローカルに用意する
 
