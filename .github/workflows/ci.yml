@@ -168,3 +168,35 @@ jobs:
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false
       - run: terraform validate
+
+  # ブランチ保護から参照する集約ジョブ。**必須チェックはこの ci ひとつだけにする。**
+  #
+  # server / front / infra は paths フィルタで skip されうるため、個別に必須
+  # チェックへ登録すると運用が破綻する。かといって changes だけを必須にすると、
+  # テストが落ちていてもマージできてしまう（実際そうなっていた）。
+  #
+  # ここで結果を一本にまとめる。skip は通過扱い、それ以外の非 success は落とす。
+  # 新しいジョブを足したら needs にも必ず追加すること。忘れるとそのジョブは
+  # 保護の対象外になり、静かに検証の網から漏れる。
+  ci:
+    needs: [changes, server, front, infra]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 各ジョブの結果を集約する
+        env:
+          RESULTS: >-
+            changes=${{ needs.changes.result }}
+            server=${{ needs.server.result }}
+            front=${{ needs.front.result }}
+            infra=${{ needs.infra.result }}
+        run: |
+          echo "$RESULTS" | tr ' ' '\n'
+          failed=0
+          for entry in $RESULTS; do
+            case "${entry#*=}" in
+              success|skipped) ;;
+              *) echo "::error::${entry%%=*} が通っていない"; failed=1 ;;
+            esac
+          done
+          exit $failed
