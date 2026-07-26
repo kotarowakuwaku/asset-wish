@@ -580,7 +580,7 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 front 側は、上記すべてを単一のコマンドに束ねる。開発を AI エージェントのループで進めるため、**エージェントに渡す停止条件が一本のコマンドで表現できること**を要件とする（要件定義書 7.2）。
 
 ```json
-"check": "tsc --noEmit && eslint . && vitest run && playwright test"
+"check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
 ```
 
 計算ロジックの正しさはサーバー側（domain のユニットテスト）で担保済みである。front の E2E で計算結果を再検証しない。E2E は導線 — 登録できる、一覧に出る、状態遷移のボタンが効く — に絞る。ここを混ぜると、遅くて壊れやすいテストで同じことを二度検証することになる。

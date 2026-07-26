@@ -134,23 +134,25 @@ jobs:
 
       - run: npm ci
 
-      # 移行期。front はまだ Expo テンプレートのままで、eslint も vitest も入っていない。
-      # Vite + React に作り直すまでは型チェックだけを回す。
-      - name: tsc（移行期）
-        if: hashFiles('front/playwright.config.ts') == ''
-        run: npx tsc --noEmit
-
-      # ここから先は playwright.config.ts が置かれた時点で自動的に有効になる。
-      # E2E はブラウザを起動するため chromium だけ入れる（全部入れると遅く、無料枠を食う）。
+      # chromium だけ入れる。全ブラウザを入れると遅く、無料枠を無駄に食う。
+      # --with-deps は OS 側の共有ライブラリ（libnspr4 等）も入れる。
+      # これが無いとブラウザの起動そのものに失敗する。
       - name: install playwright browsers
-        if: hashFiles('front/playwright.config.ts') != ''
         run: npx playwright install --with-deps chromium
 
-      # tsc + eslint + vitest + playwright。ループの停止条件と同一のコマンド。
-      # CI とローカルで検証内容がずれないよう、必ずこれ一本にまとめる。
-      - name: check
-        if: hashFiles('front/playwright.config.ts') != ''
-        run: npm run check
+      # typecheck + oxlint + vitest + playwright。
+      # ローカルでエージェントに渡す停止条件と同一のコマンド。
+      # CI とローカルで検証内容がずれると「手元では通る」が始まるため、必ず一本にまとめる。
+      - run: npm run check
+
+      # 落ちたときに何が起きたかを追えるようにする。trace も含まれる。
+      - name: upload playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: front/playwright-report/
+          retention-days: 7
 
   infra:
     needs: changes

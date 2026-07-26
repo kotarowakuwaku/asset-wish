@@ -319,7 +319,7 @@ Vite でビルドした静的ファイルを、無料枠のあるホスティン
 React Native では、エージェントが「画面が意図どおり描画されているか」を人手を介さずに確かめる手段が事実上ない。Web であれば Playwright が実際にブラウザを動かし、失敗を読み、直し、再実行できる。ここが埋まると、front の検証が次の一本のコマンドに収まる。
 
 ```json
-"check": "tsc --noEmit && eslint . && vitest run && playwright test"
+"check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
 ```
 
 `npm run check` が通ることを、そのままループの停止条件として渡せる。Expo のままではこの最後の一段が埋まらない。
@@ -423,7 +423,8 @@ M1 が完成した時点で実際に自分のデータを投入し、1ヶ月使�
 | 8 | 実行環境の再検討（Render 等） | **Cloud Run を継続。** Render は導入が容易だが、(1) スリープ回避に外部監視サービスで常時ping する運用は無料枠750時間をほぼ使い切る上に公式サポート外、(2) コールドスタートが約1分、(3) IaC を書かない手軽さが Terraform 学習の目的と衝突する、ため不採用 |
 
 | 9 | 月次支出の粒度 | **月ごとに1つの金額を都度入力する方式で確定。** 項目別の内訳は持たない（家計簿化を避けるため）。あわせて各月の黒字／赤字を一覧表示する |
-| 10 | front の技術（Expo 継続か Web か） | **Expo / React Native を取りやめ、Vite + React + TypeScript の Web SPA に変更。** 開発を AI エージェントのループで進めるにあたり、エージェントが自力で画面の正しさを判定できる手段が要る。React Native にはそれが無く、Web なら Playwright で埋まる。`tsc --noEmit && eslint . && vitest run && playwright test` が丸ごとループの停止条件になることを重視した。`server/` への影響はゼロ。判断時点で front はテンプレートのままであり、乗り換え費用が実質ゼロだったことも決め手（7.2 参照） |
+| 10 | front の技術（Expo 継続か Web か） | **Expo / React Native を取りやめ、Vite + React + TypeScript の Web SPA に変更。** 開発を AI エージェントのループで進めるにあたり、エージェントが自力で画面の正しさを判定できる手段が要る。React Native にはそれが無く、Web なら Playwright で埋まる。`npm run check`（型チェック + lint + ユニット + E2E）が丸ごとループの停止条件になることを重視した。`server/` への影響はゼロ。判断時点で front はテンプレートのままであり、乗り換え費用が実質ゼロだったことも決め手（7.2 参照） |
+| 12 | front の linter | **oxlint を採用（eslint ではなく）。** Vite の公式テンプレートが既定で同梱しており設定が要らないこと、eslint より桁違いに速いことによる。ループでは lint が1周ごとに走るため、ここの実行時間がそのまま周回速度に効く。型を要する検査は `tsc` が担うので、eslint の型情報つきルールを失う影響は小さいと判断した |
 | 11 | ネイティブアプリとしての配布 | **行わない。** スマートフォンでは PWA としてホーム画面に追加する。`vite-plugin-pwa` による後付けで足りるため、初期スコープには含めない |
 
 ### 9.2 残論点

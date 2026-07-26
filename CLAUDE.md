@@ -31,7 +31,7 @@
 | 領域 | 技術 |
 | --- | --- |
 | フロント | Vite + React + TypeScript（SPA） |
-| フロントのテスト | Vitest（ロジック）、Playwright（E2E） |
+| フロントのテスト | Vitest（ロジック）、Playwright（E2E）、oxlint |
 | 配信 | 静的ホスティング（着手時に確定）。ネイティブアプリとしては配布しない |
 | サーバー | Go |
 | DB | PostgreSQL（Neon 無料枠） |
@@ -126,7 +126,7 @@ sqlc diff                      # 生成コードが最新かの確認
 
 # front
 cd front
-npm run check                  # tsc + eslint + vitest + playwright を一括。ループの停止条件
+npm run check                  # typecheck + oxlint + vitest + playwright。ループの停止条件
 npm run dev                    # 開発サーバー
 npx playwright test --ui       # E2E を目視で追う
 ```
@@ -143,7 +143,7 @@ npx playwright test --ui       # E2E を目視で追う
    | 触った場所 | 走らせるもの |
    | --- | --- |
    | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
-   | `front/` | `npm run check`（tsc + eslint + vitest + playwright） |
+   | `front/` | `npm run check`（typecheck + oxlint + vitest + playwright） |
    | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
 
 3. 落ちたら、出力を最後まで読み、**原因を1文で言語化してから**直して 2 に戻る

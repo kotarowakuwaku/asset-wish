@@ -188,34 +188,48 @@ rm internal/domain/tmp_check.go
 brew install golangci-lint
 ```
 
-## 8. front を初期化する
+## 8. front（構築済み。クローン後に必要な作業のみ）
 
-段階6（front 実装）に入るまで後回しでよい。
+Vite + React + TypeScript の SPA として構築済み。リポジトリをクローンした環境では以下を行う。
 
 ```bash
-cd ../
-npm create vite@latest front -- --template react-ts
 cd front
-npm install
-npm install -D vitest @vitejs/plugin-react eslint @playwright/test
+npm ci
 npx playwright install chromium
 ```
 
-`package.json` に検証をまとめたスクリプトを置く。**個別のコマンドを覚えるのではなく、これ一本を通す。**
+### Linux / WSL では OS 側のライブラリも要る
+
+`npx playwright install chromium` はブラウザ本体を落とすだけで、それが依存する共有ライブラリ（`libnspr4` など）は入らない。無いと `error while loading shared libraries: libnspr4.so` で起動に失敗する。**sudo が要るため手動で実行する。**
+
+```bash
+sudo npx playwright install-deps chromium
+```
+
+macOS では不要。CI では `--with-deps` を付けているので自動で入る。
+
+### 検証は `npm run check` 一本
 
 ```json
 "scripts": {
   "dev": "vite",
   "build": "tsc -b && vite build",
-  "check": "tsc --noEmit && eslint . && vitest run && playwright test"
+  "preview": "vite preview --port 4173 --strictPort",
+  "typecheck": "tsc -b --noEmit",
+  "lint": "oxlint",
+  "test": "vitest run",
+  "e2e": "playwright test",
+  "check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
 }
 ```
 
-`npm run check` は CI の front ジョブと同一で、AI エージェントにループを回させるときの停止条件でもある（`CLAUDE.md` のループ協議、`docs/requirements.md` 7.2）。**ローカルと CI で検証内容をずらさないこと。** ずれた瞬間に「手元では通る」が始まる。
+**個別のコマンドを覚えるのではなく、これ一本を通す。** `npm run check` は CI の front ジョブと同一で、AI エージェントにループを回させるときの停止条件でもある（`CLAUDE.md` のループ協議、`docs/requirements.md` 7.2）。**ローカルと CI で検証内容をずらさないこと。** ずれた瞬間に「手元では通る」が始まる。
 
-CI の front ジョブは `front/playwright.config.ts` の有無で切り替わる。これを置くまでは型チェックのみが走る。
+linter は eslint ではなく **oxlint**。Vite のテンプレートが同梱しており、eslint より桁違いに速い。lint はループの1周ごとに走るため、ここの実行時間が周回速度に直結する（`docs/requirements.md` 9.1 #12）。
 
-スマートフォンのホーム画面に置きたくなったら、`vite-plugin-pwa` で manifest と Service Worker を後付けする。初期構築では不要。
+E2E は dev サーバーではなく `npm run build && npm run preview` の成果物に対して実行する。実際に配信するのはビルド結果なので、検証対象を本番と揃える。
+
+スマートフォンのホーム画面に置きたくなったら、`vite-plugin-pwa` で manifest と Service Worker を後付けする。現時点では不要。
 
 ## 9. 最初のコミットと push
 
