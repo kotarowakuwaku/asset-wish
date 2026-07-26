@@ -10,6 +10,8 @@
 | 対象範囲 | データモデル、ドメイン層、API、パッケージ構成、テスト方針 |
 | 対象外 | Terraform コード、画面ワイヤーフレーム（別途） |
 
+> **注記：** 本書は概観・方針レベルの設計。実装時のシグネチャ・エラーコード・テストケースは `docs/detailed-design.md` を正とする。両者に齟齬があれば詳細設計書に従う。
+
 ---
 
 ## 1. 全体構成
@@ -270,26 +272,21 @@ func (w Wish) IsCommitment() bool {
 
 ```go
 type MonthlyBalance struct {
-    id        uuid.UUID
-    yearMonth YearMonth
-    income    Money
-    expense   Money
+    ID        uuid.UUID
+    YearMonth YearMonth
+    Income    Money
+    Expense   Money
 }
 
-// Income / Expense が負なら ErrInvalidAmount。DDL の CHECK 制約と二重になるが、
-// ドメイン層で弾けないと「ありえない値を持つ構造体」が作れてしまうため必須。
+// Income / Expense が負なら ErrNegativeAmount、ym がゼロ値なら ErrInvalidYearMonth。
+// 詳細は detailed-design.md 2.7 を参照。
 func NewMonthlyBalance(id uuid.UUID, ym YearMonth, income, expense Money) (MonthlyBalance, error)
 
-func (m MonthlyBalance) ID() uuid.UUID        { return m.id }
-func (m MonthlyBalance) YearMonth() YearMonth { return m.yearMonth }
-func (m MonthlyBalance) Income() Money        { return m.income }
-func (m MonthlyBalance) Expense() Money       { return m.expense }
-
 // 月間余剰。負にもなり得る（支出過多）。
-func (m MonthlyBalance) Surplus() Money { return m.income.Sub(m.expense) }
+func (m MonthlyBalance) Surplus() Money { return m.Income.Sub(m.Expense) }
 ```
 
-`MonthlyBalance` は他エンティティ（Account / Lending / Wish）と異なり非公開フィールドを採用する。YearMonth と同じで、コンストラクタを通らないと不正な値が入り得るため。他エンティティも将来的に同じ形へ寄せる余地があるが、本版では変更しない。
+各エンティティにはコンストラクタを設け、不正な値を持つ構造体を作れないようにする。フィールドは公開のまま置くが、生成経路はコンストラクタに一本化する（Go 慣用に沿わせつつ、DDL の CHECK 制約と対をなす）。`UpdatedAt` を持たないのは、ドメインが判断に用いない値だから。`Account` が `UpdatedAt` を持つのは、残高の古さが催促表示の判断材料だからで、**ドメインが判断に使うかどうかが基準**となる。
 
 ### 3.4 状態遷移
 
