@@ -119,9 +119,15 @@ asset-wish/
 ├── .gitignore                                   ← そのまま配置
 ├── SETUP.md                                     ← この文書
 ├── .claude/
-│   └── skills/
-│       └── architecture-review/
-│           └── SKILL.md
+│   ├── settings.json                            ← フックの登録
+│   ├── skills/
+│   │   └── architecture-review/
+│   │       └── SKILL.md
+│   ├── hooks/
+│   │   ├── check-go-fast.sh                     ← 実行権限を付けること
+│   │   └── check-go-full.sh
+│   └── agents/
+│       └── fixer.md
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -184,16 +190,32 @@ brew install golangci-lint
 
 ## 8. front を初期化する
 
-段階6（front 実装）に入るまで後回しでよいが、先に作っておいても害はない。
+段階6（front 実装）に入るまで後回しでよい。
 
 ```bash
 cd ../
-npx create-expo-app@latest front
+npm create vite@latest front -- --template react-ts
+cd front
+npm install
+npm install -D vitest @vitejs/plugin-react eslint @playwright/test
+npx playwright install chromium
 ```
 
-Expo Router がテンプレートに含まれていることを確認する。**web 出力への展開余地を残すため、ルーティングは Expo Router を使う**（`docs/design.md` および `docs/requirements.md` 7.2 参照）。
+`package.json` に検証をまとめたスクリプトを置く。**個別のコマンドを覚えるのではなく、これ一本を通す。**
 
-EAS の初期化（`npx eas-cli@latest init`）は Expo アカウントが必要になるため、実際に端末で動かす段階まで不要。
+```json
+"scripts": {
+  "dev": "vite",
+  "build": "tsc -b && vite build",
+  "check": "tsc --noEmit && eslint . && vitest run && playwright test"
+}
+```
+
+`npm run check` は CI の front ジョブと同一で、AI エージェントにループを回させるときの停止条件でもある（`CLAUDE.md` のループ協議、`docs/requirements.md` 7.2）。**ローカルと CI で検証内容をずらさないこと。** ずれた瞬間に「手元では通る」が始まる。
+
+CI の front ジョブは `front/playwright.config.ts` の有無で切り替わる。これを置くまでは型チェックのみが走る。
+
+スマートフォンのホーム画面に置きたくなったら、`vite-plugin-pwa` で manifest と Service Worker を後付けする。初期構築では不要。
 
 ## 9. 最初のコミットと push
 
@@ -239,11 +261,27 @@ go test ./internal/domain/...
 
 ### CI の構成
 
-- `dorny/paths-filter` で `server` / `front` / `infra` の変更を判定し、該当するジョブだけ走らせる。EAS のビルド無料枠（月15回）を無駄に消費しないための構成
+- `dorny/paths-filter` で `server` / `front` / `infra` の変更を判定し、該当するジョブだけ走らせる。E2E はブラウザを起動するぶん時間がかかるため、front を触っていない PR で回さない意味は大きい
+- **`permissions: pull-requests: read` は必須。** 既定の `GITHUB_TOKEN` は `contents:read` のみに絞られており、これが無いと paths-filter が PR の変更ファイル一覧を取れず `Resource not accessible by integration` で初手から落ちる
 - `sqlc diff` は生成コードのコミット漏れを検出する。事故が多いので入れてある
 - `infra` ジョブは `terraform validate` までで、`plan` や `apply` は行わない。認証情報を CI に持たせないため
 
 Terraform に着手するまで `infra` ジョブは走らない。
+
+**まだ存在しない設定ファイルを前提にしたステップは、`hashFiles` で条件付きにしてある。** 現時点では `sqlc diff`（`server/sqlc.yaml` 待ち）と front の `check`（`front/playwright.config.ts` 待ち）がこれに当たる。無条件に走らせると CI が常時赤になり、「CI が赤いのはいつものこと」という状態に慣れてしまう。**検証ゲートは、赤が意味を持つ状態に保たなければ機能しない。**
+
+### ループを回す前提の構成
+
+`.claude/` に以下を置いてある。AI エージェントに作業させる際、人手を介さずに検証が回るようにするためのもの。
+
+| ファイル | 役割 |
+| --- | --- |
+| `.claude/settings.json` | フックの登録 |
+| `.claude/hooks/check-go-fast.sh` | `Write`/`Edit` の直後に `gofmt` と `go build`。壊れたまま先に進ませない |
+| `.claude/hooks/check-go-full.sh` | 作業を終えようとした瞬間に `go test` / `go vet` / `golangci-lint`。落ちていれば差し戻す |
+| `.claude/agents/fixer.md` | 同じエラーで2周足踏みしたときに呼ぶ、別コンテキストの担当 |
+
+`CLAUDE.md` の「ループ協議」が完了の定義（＝チェックが緑であること）を担い、フックがそれを機械的に強制する。**片方だけでは効かない。** 規約だけならエージェントは自己申告で完了を宣言できてしまうし、フックだけでは何を直すべきかの方針が伝わらない。
 
 ### レビュースキルの使い方
 

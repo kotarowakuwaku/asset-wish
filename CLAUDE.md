@@ -30,8 +30,9 @@
 
 | 領域 | 技術 |
 | --- | --- |
-| フロント | Expo / React Native (TypeScript)、Expo Router |
-| 配信 | Expo Go + EAS Update（App Store には出さない） |
+| フロント | Vite + React + TypeScript（SPA） |
+| フロントのテスト | Vitest（ロジック）、Playwright（E2E） |
+| 配信 | 静的ホスティング（着手時に確定）。ネイティブアプリとしては配布しない |
 | サーバー | Go |
 | DB | PostgreSQL（Neon 無料枠） |
 | クエリ | sqlc（ORM は使わない） |
@@ -43,7 +44,7 @@
 モノレポ。
 
 ```
-front/     Expo / React Native
+front/     Vite + React + TypeScript
 server/    Go（go.mod はこの階層）
 infra/     Terraform
 docs/      要件定義書・設計書
@@ -125,10 +126,12 @@ sqlc diff                      # 生成コードが最新かの確認
 
 # front
 cd front
-npx tsc --noEmit
-npx eslint .
-npx expo start
+npm run check                  # tsc + eslint + vitest + playwright を一括。ループの停止条件
+npm run dev                    # 開発サーバー
+npx playwright test --ui       # E2E を目視で追う
 ```
+
+`npm run check` が front の検証の入口。個別に走らせるより、まずこれを通す。
 
 ## ループ協議 — 「完了」の定義
 
@@ -140,7 +143,7 @@ npx expo start
    | 触った場所 | 走らせるもの |
    | --- | --- |
    | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
-   | `front/` | `npx tsc --noEmit` |
+   | `front/` | `npm run check`（tsc + eslint + vitest + playwright） |
    | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
 
 3. 落ちたら、出力を最後まで読み、**原因を1文で言語化してから**直して 2 に戻る
@@ -174,7 +177,7 @@ npx expo start
 | 3 | `repository` 実装 | |
 | 4 | `usecase`・`handler` | |
 | 5 | Terraform / GCP | 実運用したくなった時点で着手 |
-| 6 | front（Expo） | |
+| 6 | front（Vite + React SPA） | |
 
 段階1はインフラを一切用意せずに進む。DB も GCP も立てずに、`domain/networth_test.go` から書き始める。テストケースは `docs/design.md` の 6.1 に15件挙げてある。
 

@@ -18,11 +18,11 @@
 
 ```
 ┌──────────────┐   HTTPS    ┌──────────────┐          ┌──────────┐
-│  Expo Go     │ ─────────▶ │  Cloud Run   │ ───────▶ │  Neon    │
-│  (front)     │            │  (server/Go) │          │ Postgres │
+│  ブラウザ    │ ─────────▶ │  Cloud Run   │ ───────▶ │  Neon    │
+│  (front/SPA) │            │  (server/Go) │          │ Postgres │
 └──────────────┘            └──────────────┘          └──────────┘
       ▲                            ▲
-      │ eas update                 │ deploy
+      │ 静的ホスティング           │ deploy
       │                            │
 ┌─────────────────────────────────────────────┐
 │  GitHub（モノレポ） / GitHub Actions        │
@@ -424,7 +424,7 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 **`GET /api/dashboard`**
 
-モバイルからのラウンドトリップを減らすため、トップ画面に必要な値をまとめて返す。
+ラウンドトリップを減らすため、トップ画面に必要な値をまとめて返す。
 
 ```json
 {
@@ -487,7 +487,9 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 単一ユーザーのため、環境変数に設定した固定トークンを `Authorization: Bearer <token>` で検証する方式とする。ユーザー管理・パスワード・セッションは実装しない。
 
-Cloud Run のサービスは公開（未認証呼び出し許可）とし、認可はアプリケーション側で行う。トークンは端末のセキュアストレージに保管する。
+Cloud Run のサービスは公開（未認証呼び出し許可）とし、認可はアプリケーション側で行う。トークンはブラウザの `localStorage` に保管する。XSS があれば読まれる置き場所だが、単一ユーザーかつ自分の端末のみという前提のもとで許容する（要件定義書 6章）。
+
+front は別オリジンから API を呼ぶため、CORS の許可オリジンを環境変数で受け取る。ワイルドカードは使わない。
 
 ---
 
@@ -570,8 +572,18 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | usecase | 手書きの fake リポジトリ | オーケストレーション、トランザクション境界 |
 | handler | `net/http/httptest` | ステータスコード、JSON 形式 |
 | repository | 実 DB（ローカル Postgres） | SQL の正しさ、制約 |
+| front（ロジック） | Vitest | 表示整形、入力バリデーション |
+| front（E2E） | Playwright | 主要導線が実際に動くこと |
 
 モックライブラリは導入せず、インターフェースを手書きの fake で満たす。定義したインターフェースが実装しやすいかどうかが、そのまま設計の良し悪しのフィードバックになるため。
+
+front 側は、上記すべてを単一のコマンドに束ねる。開発を AI エージェントのループで進めるため、**エージェントに渡す停止条件が一本のコマンドで表現できること**を要件とする（要件定義書 7.2）。
+
+```json
+"check": "tsc --noEmit && eslint . && vitest run && playwright test"
+```
+
+計算ロジックの正しさはサーバー側（domain のユニットテスト）で担保済みである。front の E2E で計算結果を再検証しない。E2E は導線 — 登録できる、一覧に出る、状態遷移のボタンが効く — に絞る。ここを混ぜると、遅くて壊れやすいテストで同じことを二度検証することになる。
 
 ### 6.1 最初に書くべきテストケース
 
@@ -612,6 +624,6 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | 3 | `repository` 実装とテスト | 同上 |
 | 4 | `usecase`、`handler` | — |
 | 5 | Terraform（Cloud Run / Artifact Registry / 予算アラート / GCS backend） | GCP プロジェクト |
-| 6 | front（Expo） | API が動くこと |
+| 6 | front（Vite + React SPA） | API が動くこと |
 
 段階1はインフラを一切用意せずに進められる。**先に Terraform や GCP の設定から入ると、アプリの中身に到達する前に消耗しやすい。** ドメイン層が固まってからインフラに向かう順序を推奨する。
