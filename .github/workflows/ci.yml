@@ -85,9 +85,16 @@ jobs:
         run: go vet ./...
 
       # レイヤ境界の検証を含む。domain が外部依存を持った時点でここが落ちる。
+      #
+      # action は v8 系（golangci-lint v2 対応）を使う。v6 は v1.64 を入れてくるが、
+      # v1.64 は go1.24 でビルドされており go.mod の 1.26 を読めずに落ちる。
+      # また .golangci.yml は version: "2" 形式なので v1 では解釈できない。
+      # バージョンはローカルと揃えて固定する。ここがずれると
+      # 「手元では通るのに CI で落ちる」が始まり、ループが信用できなくなる。
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
+          version: v2.12.2
           working-directory: server
 
       # 生成コードのコミット漏れ検出。事故が多いので必ず入れる。
@@ -126,12 +133,24 @@ jobs:
           cache-dependency-path: front/package-lock.json
 
       - run: npm ci
-      - run: npx tsc --noEmit
 
-      # eslint はまだ設定も依存も入っていない。設定ファイルを置いた時点で有効になる。
-      - name: eslint
-        if: hashFiles('front/eslint.config.js', 'front/eslint.config.mjs', 'front/.eslintrc.js', 'front/.eslintrc.json') != ''
-        run: npx eslint .
+      # 移行期。front はまだ Expo テンプレートのままで、eslint も vitest も入っていない。
+      # Vite + React に作り直すまでは型チェックだけを回す。
+      - name: tsc（移行期）
+        if: hashFiles('front/playwright.config.ts') == ''
+        run: npx tsc --noEmit
+
+      # ここから先は playwright.config.ts が置かれた時点で自動的に有効になる。
+      # E2E はブラウザを起動するため chromium だけ入れる（全部入れると遅く、無料枠を食う）。
+      - name: install playwright browsers
+        if: hashFiles('front/playwright.config.ts') != ''
+        run: npx playwright install --with-deps chromium
+
+      # tsc + eslint + vitest + playwright。ループの停止条件と同一のコマンド。
+      # CI とローカルで検証内容がずれないよう、必ずこれ一本にまとめる。
+      - name: check
+        if: hashFiles('front/playwright.config.ts') != ''
+        run: npm run check
 
   infra:
     needs: changes
