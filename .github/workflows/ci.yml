@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# 既定の GITHUB_TOKEN は contents:read のみに絞られている。
+# paths-filter は PR の変更ファイル一覧を GitHub API から取るため
+# pull-requests:read が無いと "Resource not accessible by integration" で落ちる。
+permissions:
+  contents: read
+  pull-requests: read
+
 # 同じブランチで新しい push が来たら古い実行を止める（無駄なランナー消費を防ぐ）
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -84,11 +91,17 @@ jobs:
           working-directory: server
 
       # 生成コードのコミット漏れ検出。事故が多いので必ず入れる。
-      - name: sqlc diff
+      # 段階2で sqlc.yaml を置いた時点で自動的に有効になる。
+      # それまで無条件に走らせると設定ファイルが無くて必ず落ち、
+      # 検証ゲートが常時赤になってループが機能しなくなる。
+      - name: setup sqlc
+        if: hashFiles('server/sqlc.yaml', 'server/sqlc.json') != ''
         uses: sqlc-dev/setup-sqlc@v4
         with:
           sqlc-version: '1.27.0'
-      - run: sqlc diff
+      - name: sqlc diff
+        if: hashFiles('server/sqlc.yaml', 'server/sqlc.json') != ''
+        run: sqlc diff
 
       - name: test
         env:
@@ -114,7 +127,11 @@ jobs:
 
       - run: npm ci
       - run: npx tsc --noEmit
-      - run: npx eslint .
+
+      # eslint はまだ設定も依存も入っていない。設定ファイルを置いた時点で有効になる。
+      - name: eslint
+        if: hashFiles('front/eslint.config.js', 'front/eslint.config.mjs', 'front/.eslintrc.js', 'front/.eslintrc.json') != ''
+        run: npx eslint .
 
   infra:
     needs: changes
