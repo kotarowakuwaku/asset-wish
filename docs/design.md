@@ -150,7 +150,43 @@ func (m Money) IsZero() bool       { return m == 0 }
 
 `int64` の型エイリアスにメソッドを生やす形とする。構造体にしないのは、ゼロ値がそのまま「0円」として意味を持ち、比較演算子がそのまま使えるため。通貨が複数になったら構造体に変える。
 
-### 3.2 エンティティ
+### 3.2 YearMonth
+
+月単位の識別子。`time.Time` を裸で扱うと以下の事故が避けられない。
+
+- 月初以外の日（`2026-07-15` など）を代入できてしまう
+- タイムゾーンが持ち込まれる。JST の月初は UTC では前月末日になり、DB との変換で必ず事故る
+- 比較・ソートの意味が曖昧になる（同じ月でも時刻が違えば `!=`）
+
+Money を `int64` の裸で扱わないのと同じ理由で、専用の値オブジェクトにする。
+
+```go
+package domain
+
+type YearMonth struct {
+    year  int
+    month time.Month
+}
+
+// 月が [1, 12] の範囲外なら ErrInvalidYearMonth。
+func NewYearMonth(y int, m time.Month) (YearMonth, error)
+
+func (ym YearMonth) Year() int         { return ym.year }
+func (ym YearMonth) Month() time.Month { return ym.month }
+
+// "2026-07" 形式。
+func (ym YearMonth) String() string
+
+// 年月の昇順比較。
+func (ym YearMonth) Before(o YearMonth) bool
+
+// n ヶ月加算（n が負なら減算）。繰り上がり・繰り下がりを含む。
+func (ym YearMonth) AddMonths(n int) YearMonth
+```
+
+**非公開フィールド + コンストラクタの意図：** 不正な値を持つインスタンスを構造的に作れなくする。タイムゾーンを型に持ち込まない。等値比較は値レシーバなので `==` がそのまま使える。DB との変換（月初 DATE ⇔ YearMonth）は `adapter/repository` の責務。
+
+### 3.3 エンティティ
 
 ```go
 type AccountKind string
@@ -232,7 +268,30 @@ func (w Wish) IsCommitment() bool {
 }
 ```
 
-### 3.3 状態遷移
+```go
+type MonthlyBalance struct {
+    id        uuid.UUID
+    yearMonth YearMonth
+    income    Money
+    expense   Money
+}
+
+// Income / Expense が負なら ErrInvalidAmount。DDL の CHECK 制約と二重になるが、
+// ドメイン層で弾けないと「ありえない値を持つ構造体」が作れてしまうため必須。
+func NewMonthlyBalance(id uuid.UUID, ym YearMonth, income, expense Money) (MonthlyBalance, error)
+
+func (m MonthlyBalance) ID() uuid.UUID        { return m.id }
+func (m MonthlyBalance) YearMonth() YearMonth { return m.yearMonth }
+func (m MonthlyBalance) Income() Money        { return m.income }
+func (m MonthlyBalance) Expense() Money       { return m.expense }
+
+// 月間余剰。負にもなり得る（支出過多）。
+func (m MonthlyBalance) Surplus() Money { return m.income.Sub(m.expense) }
+```
+
+`MonthlyBalance` は他エンティティ（Account / Lending / Wish）と異なり非公開フィールドを採用する。YearMonth と同じで、コンストラクタを通らないと不正な値が入り得るため。他エンティティも将来的に同じ形へ寄せる余地があるが、本版では変更しない。
+
+### 3.4 状態遷移
 
 **遷移ルールはエンティティのメソッドに閉じ込める。** usecase 層は「どの遷移を起こしたいか」だけを知り、その遷移が許されるかは知らない。
 
@@ -276,7 +335,7 @@ func (w *Wish) Drop() error {
 
 完了と見送りは終端状態。取り消しは行わない（誤操作は削除して作り直す）。
 
-### 3.4 計算ロジック
+### 3.5 計算ロジック
 
 **本アプリの中核。外部依存を一切持たない純粋関数として実装する。**
 
@@ -312,9 +371,18 @@ func CalculateShortfall(wish Wish, netAsset Money) Money
 // データが 0 件なら ok=false。
 func AverageSurplus(balances []MonthlyBalance, months int) (Money, bool)
 
-// 到達見込み月数。平均余剰が 0 以下、または不足額が 0 以下なら ok=false。
-func MonthsToReach(shortfall Money, avgSurplus Money) (int, bool)
+// 到達見込み月数。切り上げ除算。
+// 平均余剰が 0 以下、または不足額が 0 以下（既に達成）なら ok=false。
+// 浮動小数点は使わない。金額計算に float を持ち込むと型の一貫性が崩れる。
+func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
+    if shortfall <= 0 || avgSurplus <= 0 {
+        return 0, false
+    }
+    return int((shortfall + avgSurplus - 1) / avgSurplus), true
+}
 ```
+
+`(a + b - 1) / b` は正の整数に対する切り上げ除算。ちょうど割り切れる場合（例：不足120万 ÷ 月余剰20万 = 6.0）も6を返す。テストは割り切れるケースと割り切れないケースの両方を必ず含める。境界を1つ間違えると全部ずれる。
 
 `AverageSurplus` に渡す `balances` は **年月の降順にソート済み**であることを前提とする。ソートは呼び出し側（usecase）の責務。
 
@@ -529,8 +597,12 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | 13 | 到達見込み：不足額が0以下 | ok=false（既に達成済み） |
 | 14 | 状態遷移：完了から確定へ | エラー |
 | 15 | 回収：未回収残高を超える額 | エラー |
+| 16 | 到達見込み：ちょうど割り切れる（例：120万 ÷ 月余剰20万） | 6 |
+| 17 | 到達見込み：割り切れない（例：121万 ÷ 月余剰20万） | 7（切り上げ） |
 
 ケース2、6、7は、要件定義書 3.1 の「二重計上しない」「投資は別枠」というルールが守られているかを直接検証するもの。ここが壊れるとアプリの存在意義が消えるため、最優先で書く。
+
+ケース16、17は切り上げ除算の境界検証。片方だけだと `(a + b - 1) / b` の `- 1` を落としても気付けない。両方あってはじめて off-by-one を検出できる。
 
 ---
 
