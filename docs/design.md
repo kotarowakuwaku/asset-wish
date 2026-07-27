@@ -507,6 +507,7 @@ server/
 │   │   ├── lending.go
 │   │   ├── wish.go
 │   │   ├── monthly_balance.go
+│   │   ├── transaction.go       残高が動いた記録。実質資産の計算には使わない
 │   │   ├── networth.go          実質資産・不足額・到達見込みの純粋関数
 │   │   └── errors.go            ドメインエラーの定義
 │   ├── usecase/
@@ -547,10 +548,16 @@ package usecase
 type WishRepository interface {
     List(ctx context.Context, status *domain.WishStatus) ([]domain.Wish, error)
     Get(ctx context.Context, id uuid.UUID) (domain.Wish, error)
-    Save(ctx context.Context, w domain.Wish) error
+    Create(ctx context.Context, w domain.Wish) error
+    // 内容の更新と状態遷移を1本にまとめない。まとめると、遷移の可否を
+    // 判定する domain のメソッドを迂回して status を書ける経路ができる。
+    UpdateContent(ctx context.Context, w domain.Wish) error
+    UpdateStatus(ctx context.Context, w domain.Wish) error
     Delete(ctx context.Context, id uuid.UUID) error
 }
 ```
+
+全インターフェースの定義は `docs/detailed-design.md` 3.1 を参照する。
 
 ### 5.2 変換の責務
 

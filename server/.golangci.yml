@@ -1,7 +1,9 @@
 # golangci-lint v2 系の設定形式。
 # v1 を使う場合は linters.settings ではなくトップレベルの settings に置く。
 #
-# ★ github.com/kotarowakuwaku/asset-wish/server を実際の module パス（go.mod の module 行）に置換すること。
+# depguard の pkg に書くパスは go.mod の module 行に追随させること。
+# module パスを変えたらここも直す。ずれても lint は通ってしまい、
+# レイヤ境界の検証だけが静かに無効になる。
 version: "2"
 
 run:
@@ -48,6 +50,10 @@ linters:
           deny:
             - pkg: "net/http"
               desc: "usecase は HTTP を知らない"
+            - pkg: "database/sql"
+              desc: "トランザクション境界は TxManager 越しに張る。usecase は DB の実体を知らない"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/db"
+              desc: "sqlc 生成コードを usecase に持ち込まない。変換は adapter/repository の責務"
             - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/adapter"
               desc: "usecase はインターフェースにのみ依存する。実装を import しない"
             - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/infra"

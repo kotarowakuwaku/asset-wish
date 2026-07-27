@@ -28,6 +28,7 @@ server/internal/domain/
 ├── lending.go          Lending, CollectionStatus
 ├── wish.go             Wish, WishStatus, WishCategory
 ├── monthly_balance.go  MonthlyBalance
+├── transaction.go      Transaction, TransactionKind
 └── networth.go         計算関数（本アプリの中核）
 ```
 
@@ -502,6 +503,42 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 `(a + b - 1) / b` が正の整数に対する切り上げ除算。ちょうど割り切れる場合は切り上がらない（600000 ÷ 100000 = 6）。
 
+### 2.10 Transaction
+
+口座残高が動いた記録。
+
+```go
+type TransactionKind string
+
+const (
+    TransactionLendingCreated   TransactionKind = "lending_created"
+    TransactionLendingCollected TransactionKind = "lending_collected"
+    TransactionWishPaid         TransactionKind = "wish_paid"
+    TransactionAdjustment       TransactionKind = "adjustment"
+)
+
+type Transaction struct {
+    ID        uuid.UUID
+    AccountID uuid.UUID
+    Amount    Money           // 符号付き。口座から出るときは負
+    Kind      TransactionKind
+    RefID     *uuid.UUID      // 立替またはウィッシュの ID。adjustment のみ nil
+    OccurredOn time.Time
+}
+```
+
+**実質資産の計算には使わない。** 実質資産は `accounts.balance` から出す（2.9.2）ため、この型に集計のメソッドは持たせない。残高の裏付けを後から辿るためだけに存在する。
+
+`NewTransaction` は次を弾く。
+
+| 条件 | エラー |
+| --- | --- |
+| 金額が 0 | `ErrInvalidAmount`。残高が動かない記録に意味は無い |
+| 種別が不正 | `ErrInvalidTransactionKind` |
+| adjustment 以外で参照先が nil | `ErrMissingReference` |
+
+逆に adjustment に参照先を渡しても保持しない。`ref_id` は参照先が2種類あるため外部キーを張れず（design.md 2.3）、整合性はアプリ側で担保するしかない。だから入口で締める。
+
 ---
 
 ## 3. usecase 層
@@ -523,7 +560,8 @@ type LendingRepository interface {
     List(ctx context.Context, outstandingOnly bool) ([]domain.Lending, error)
     Get(ctx context.Context, id uuid.UUID) (domain.Lending, error)
     Create(ctx context.Context, l domain.Lending) error
-    Update(ctx context.Context, l domain.Lending) error
+    // UpdateCollected は回収額だけを反映する。
+    UpdateCollected(ctx context.Context, l domain.Lending) error
     Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -531,7 +569,10 @@ type WishRepository interface {
     List(ctx context.Context, status *domain.WishStatus) ([]domain.Wish, error)
     Get(ctx context.Context, id uuid.UUID) (domain.Wish, error)
     Create(ctx context.Context, w domain.Wish) error
-    Update(ctx context.Context, w domain.Wish) error
+    // UpdateContent は title / amount / priority / deadline を反映する。
+    UpdateContent(ctx context.Context, w domain.Wish) error
+    // UpdateStatus は状態だけを反映する。
+    UpdateStatus(ctx context.Context, w domain.Wish) error
     Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -539,8 +580,8 @@ type MonthlyBalanceRepository interface {
     // ListRecent は年月の降順で最大 limit 件を返す。
     ListRecent(ctx context.Context, limit int) ([]domain.MonthlyBalance, error)
     ListAll(ctx context.Context) ([]domain.MonthlyBalance, error)
-    // Upsert は同一年月のレコードがあれば更新、なければ作成する。
-    Upsert(ctx context.Context, m domain.MonthlyBalance) error
+    // Upsert は同一年月のレコードがあれば更新、なければ作成し、保存後の姿を返す。
+    Upsert(ctx context.Context, m domain.MonthlyBalance) (domain.MonthlyBalance, error)
 }
 
 type TransactionRepository interface {
@@ -558,6 +599,14 @@ type TxManager interface {
 **インターフェースは `usecase` パッケージに置く。** 実装は `adapter/repository` にあるが、使う側が定義することで依存の向きを保つ（依存性逆転）。
 
 `Get` で対象が存在しない場合は `usecase.ErrNotFound` を返す。これは `DomainError` ではなく、handler で 404 にマッピングする。
+
+**更新系は操作ごとに分ける。** 当初は全項目を書き戻す `Update` を1本ずつ置く形だったが、それだと状態遷移や口座種別まで巻き込んで上書きでき、`domain` の判定を通さない変更経路ができる。SQL 側も同じ形に割ってある（`CLAUDE.md`「更新クエリを操作別に分ける」）。
+
+- `AccountRepository.Update` は名称・残高・更新日時のみ。`Kind` は変えられない（不変条件1）
+- `WishRepository` は内容と状態で分ける（不変条件6）
+- `LendingRepository` は回収額のみ更新できる（不変条件4）
+
+`MonthlyBalanceRepository.Upsert` が保存後の姿を返すのは ID のため。`ON CONFLICT DO UPDATE` は既存行の ID を維持するので、呼び出し側が採番した ID は競合時に捨てられる。返さないと、DB に存在しない ID を持ったまま処理が進む。
 
 ### 3.2 主要ユースケースの処理手順
 

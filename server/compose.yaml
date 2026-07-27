@@ -1,0 +1,29 @@
+# ローカル開発用の PostgreSQL。
+#
+# イメージは .github/workflows/ci.yml の services.postgres と同じ版に揃えること。
+# ずれると「手元では通るのに CI で落ちる」が始まり、検証ループが信用できなくなる。
+#
+#   docker compose up -d
+#   goose -dir db/migrations postgres "$DATABASE_URL" up
+#
+# 資格情報はローカル専用の使い捨て。本番の接続文字列は環境変数から読む
+# （CLAUDE.md 不変条件17）。
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
