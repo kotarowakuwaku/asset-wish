@@ -390,6 +390,39 @@ curl -H "Authorization: Bearer $AUTH_TOKEN" http://localhost:8080/api/dashboard
 
 **`AUTH_TOKEN` をシェル履歴やファイルに残さない。** このリポジトリは public（`CLAUDE.md` 不変条件17）。
 
+## 13. front を動かす（段階6以降）
+
+API の場所はビルド時の環境変数で決める。**トークンはここに入れない**（成果物ごと公開される）。
+
+```bash
+cd front
+echo 'VITE_API_BASE_URL=http://localhost:8080' > .env.local   # .gitignore 済み
+npm run dev
+```
+
+初回はトークンの入力を求められる。サーバーの `AUTH_TOKEN` と同じ値を入れる。この端末の `localStorage` にのみ保存される。
+
+サーバー側の `ALLOWED_ORIGINS` に front のオリジンを入れておくこと。入っていないとブラウザが CORS で弾き、画面には「サーバーに接続できませんでした」とだけ出る。
+
+```bash
+export ALLOWED_ORIGINS='http://localhost:5173'   # npm run dev のオリジン
+```
+
+### 実物のサーバーとつないで確認する
+
+`npm run check` の E2E は API をブラウザ側で差し替えており、**サーバーも DB も起動しない**。CORS・認証・JSON の噛み合わせはそこでは分からないので、疑わしいときは実物で通す。
+
+```bash
+# 1) DB とサーバー
+cd server && docker compose up -d
+export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
+goose -dir db/migrations postgres "$DATABASE_URL" up
+AUTH_TOKEN=$(openssl rand -hex 16) ALLOWED_ORIGINS='http://localhost:4173' PORT=8081 go run ./cmd/api
+
+# 2) front（別のシェルで）
+cd front && VITE_API_BASE_URL=http://localhost:8081 npm run build && npm run preview
+```
+
 ### テストを回したあとに 500 が出たら
 
 `go test ./...` のあとで API が `INTERNAL_ERROR` を返すことがある。repository のテストが、**CHECK 制約を外して壊れた行を意図的に作る**ため（復元時の検証が効くことの確認）。その行がローカル DB に残っていると、一覧の取得が「不正な値をドメイン層へ渡さない」判断で止まる。
