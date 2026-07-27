@@ -1,0 +1,162 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import type { ApiClient } from '../api/client'
+import type { Dashboard as DashboardData } from '../api/types'
+import { Dashboard } from './Dashboard'
+
+// 値はすべて架空のもの（CLAUDE.md 不変条件17）。
+//
+// ここで確かめるのは「受け取った値をどう見せるか」だけ。
+// 実質資産や不足額の計算はサーバーの domain が持ち、front は
+// 一切計算しない（不変条件8）。計算の正しさをここで再検証しない。
+
+function stubClient(data: DashboardData): ApiClient {
+  return {
+    getDashboard: () => Promise.resolve(data),
+  } as unknown as ApiClient
+}
+
+const base: DashboardData = {
+  netAsset: 842000,
+  breakdown: {
+    cashTotal: 910000,
+    outstandingLendings: 12000,
+    commitments: 80000,
+  },
+  investmentTotal: 350000,
+  averageSurplus: 65000,
+  hasAverageSurplus: true,
+  wishes: [],
+}
+
+describe('実質資産', () => {
+  it('内訳とあわせて表示する', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('¥842,000')).toBeInTheDocument()
+    })
+    expect(screen.getByText('¥910,000')).toBeInTheDocument()
+    expect(screen.getByText('¥12,000')).toBeInTheDocument()
+    expect(screen.getByText('¥80,000')).toBeInTheDocument()
+  })
+
+  // 投資は実質資産に含めない別枠の参考値（不変条件1）。
+  // 同じ並びに混ぜて出すと、合計に入っていると誤解される。
+  it('投資は別枠で、含めていないと明記する', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('¥350,000')).toBeInTheDocument()
+    })
+    expect(
+      screen.getByRole('heading', { name: '投資資産（参考）' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('実質資産には含めていません。'),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('平均月間余剰', () => {
+  it('算出できるときは金額を出す', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('¥65,000')).toBeInTheDocument()
+    })
+  })
+
+  // hasAverageSurplus が false のとき averageSurplus には 0 が入るが、
+  // 表示してはいけない（detailed-design 6.1）。「余剰0円」と読めてしまう。
+  it('算出できないときは金額を出さない', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          averageSurplus: 0,
+          hasAverageSurplus: false,
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('月次収支がまだ登録されていません。'),
+      ).toBeInTheDocument()
+    })
+    expect(screen.queryByText('¥0')).not.toBeInTheDocument()
+  })
+})
+
+describe('ウィッシュ', () => {
+  it('不足額と到達見込みを並べる', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          wishes: [
+            {
+              id: '1',
+              title: 'カメラ',
+              amount: 1200000,
+              category: 'item',
+              status: 'considering',
+              priority: 0,
+              deadline: null,
+              shortfall: 358000,
+              monthsToReach: 6,
+            },
+          ],
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('カメラ')).toBeInTheDocument()
+    })
+    expect(screen.getByText('あと¥358,000')).toBeInTheDocument()
+    expect(screen.getByText('あと6ヶ月')).toBeInTheDocument()
+  })
+
+  // 算出不可を 0 として出すと「今月中に届く」と誤読される。
+  it('到達見込みが null なら算出不可と出す', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          wishes: [
+            {
+              id: '1',
+              title: '旅行',
+              amount: 300000,
+              category: 'experience',
+              status: 'committed',
+              priority: 0,
+              deadline: null,
+              shortfall: -1000,
+              monthsToReach: null,
+            },
+          ],
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('算出不可')).toBeInTheDocument()
+    })
+    // 不足額が 0 以下ならすでに手が届いている。
+    expect(screen.getByText('到達済み')).toBeInTheDocument()
+    expect(screen.queryByText('あと0ヶ月')).not.toBeInTheDocument()
+  })
+
+  it('1件も無ければその旨を出す', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('登録されているウィッシュはありません。'),
+      ).toBeInTheDocument()
+    })
+  })
+})

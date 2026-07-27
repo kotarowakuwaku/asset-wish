@@ -1,7 +1,304 @@
-/* 段階6で本実装する。いまは仮の画面のみ。 */
+/* 画面のスタイル。色や余白の変数は index.css の :root に定義済み。 */
 
-main {
-  max-width: 40rem;
+.app {
+  max-width: 44rem;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.app-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.app-head h1 {
+  font-size: 1.4rem;
+  color: var(--text-h);
+}
+
+/* 画面の切り替え。スマートフォンでも収まるように折り返す。 */
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.nav button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.nav button[aria-current='page'] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.section h2 {
+  font-size: 1rem;
+  color: var(--text-h);
+  margin: 0;
+}
+
+/* 実質資産はこのアプリの主役なので、いちばん大きく出す。 */
+.net-asset {
+  padding: 1.25rem;
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+  background: var(--accent-bg);
+}
+
+.net-asset h2 {
+  font-size: 0.9rem;
+}
+
+.net-asset-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--text-h);
+  margin: 0.25rem 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.breakdown dt,
+.breakdown dd {
+  margin: 0;
+}
+
+.reference-value {
+  font-size: 1.3rem;
+  color: var(--text-h);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.25rem;
+}
+
+.card-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.card-head strong {
+  color: var(--text-h);
+}
+
+.card-body,
+.card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-h);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.badge-good {
+  border-color: rgba(34, 197, 94, 0.5);
+  color: rgb(21, 128, 61);
+}
+
+.badge-warn {
+  border-color: rgba(234, 179, 8, 0.5);
+  color: rgb(161, 98, 7);
+}
+
+.badge-bad {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: rgb(185, 28, 28);
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge-good {
+    color: rgb(134, 239, 172);
+  }
+  .badge-warn {
+    color: rgb(253, 224, 71);
+  }
+  .badge-bad {
+    color: rgb(252, 165, 165);
+  }
+}
+
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tabs button {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.tabs button[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+.inline-form {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.field-label {
+  font-size: 0.8rem;
+}
+
+input,
+select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+button {
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.actions button,
+.form button[type='submit'],
+.error button {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.form button[type='submit'] {
+  justify-self: start;
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.link {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+
+.muted {
+  color: var(--text);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.error {
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.form-error {
+  color: rgb(185, 28, 28);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .form-error {
+    color: rgb(252, 165, 165);
+  }
 }
