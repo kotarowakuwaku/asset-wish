@@ -403,7 +403,7 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | GET | `/api/dashboard` | ダッシュボード用の集約データ |
 | GET | `/api/accounts` | 口座一覧 |
 | POST | `/api/accounts` | 口座作成 |
-| PATCH | `/api/accounts/{id}` | 口座の更新（名称・残高） |
+| PATCH | `/api/accounts/{id}` | 口座の更新（名称・残高。種別は変更不可） |
 | DELETE | `/api/accounts/{id}` | 口座削除 |
 | GET | `/api/lendings` | 立替一覧（`?outstanding=true` で未回収のみ） |
 | POST | `/api/lendings` | 立替登録 |
@@ -411,7 +411,7 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | DELETE | `/api/lendings/{id}` | 立替削除 |
 | GET | `/api/wishes` | ウィッシュ一覧（`?status=` で絞り込み） |
 | POST | `/api/wishes` | ウィッシュ登録 |
-| PATCH | `/api/wishes/{id}` | 内容の更新（title / amount / priority / deadline） |
+| PATCH | `/api/wishes/{id}` | 内容の更新（title / amount / category / priority / deadline） |
 | POST | `/api/wishes/{id}/commit` | 検討中 → 確定 |
 | POST | `/api/wishes/{id}/pay` | 確定 → 完了 |
 | POST | `/api/wishes/{id}/drop` | → 見送り |

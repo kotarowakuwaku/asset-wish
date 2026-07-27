@@ -368,6 +368,39 @@ sudo apt install -y build-essential   # 無いと go test -race が cgo 不足�
 
 入れると `CGO_ENABLED` の既定が 0 から 1 に変わり、手元の `go build` が動的リンクのバイナリを吐くようになる。デプロイ用のビルドは段階5でコンテナの中でやるため実害は無いが、変わること自体は知っておく。
 
+## 12. API サーバーを手元で動かす（段階4以降）
+
+必要な環境変数は4つ。**足りなければ起動しない。** 起動してから「認証が素通りだった」と気付くより安全側に倒す。
+
+```bash
+cd server
+export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
+export AUTH_TOKEN="$(openssl rand -hex 16)"   # 32文字以上。短いと起動を拒否する
+export ALLOWED_ORIGINS='http://localhost:5173'  # front の開発サーバー。ワイルドカード不可
+export PORT=8080                                # 省略時 8080
+
+go run ./cmd/api
+```
+
+呼ぶときは Bearer トークンを付ける。
+
+```bash
+curl -H "Authorization: Bearer $AUTH_TOKEN" http://localhost:8080/api/dashboard
+```
+
+**`AUTH_TOKEN` をシェル履歴やファイルに残さない。** このリポジトリは public（`CLAUDE.md` 不変条件17）。
+
+### テストを回したあとに 500 が出たら
+
+`go test ./...` のあとで API が `INTERNAL_ERROR` を返すことがある。repository のテストが、**CHECK 制約を外して壊れた行を意図的に作る**ため（復元時の検証が効くことの確認）。その行がローカル DB に残っていると、一覧の取得が「不正な値をドメイン層へ渡さない」判断で止まる。
+
+アプリとしては正しい振る舞いなので、DB を作り直せばよい。
+
+```bash
+docker compose down -v && docker compose up -d
+goose -dir db/migrations postgres "$DATABASE_URL" up
+```
+
 ---
 
 ## セットアップ後：どこから書くか
