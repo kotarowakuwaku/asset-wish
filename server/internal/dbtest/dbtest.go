@@ -9,6 +9,7 @@
 package dbtest
 
 import (
+	"context"
 	"database/sql"
 	"net/url"
 	"os"
@@ -58,7 +59,19 @@ func RequireLocalDSN(t *testing.T) string {
 	return dsn
 }
 
+// schemaLockKey は DB を使うテストを直列化するためのアドバイザリロックの鍵。
+// 値そのものに意味は無く、他の用途と衝突しなければよい。
+const schemaLockKey int64 = 20260727
+
 // Open は接続を開き、実際に到達できることまで確かめる。
+//
+// あわせて、テストが終わるまでアドバイザリロックを取る。go test は
+// パッケージを並行して走らせるため、DB を使うテストが2パッケージ以上に
+// なると、同じ public スキーマを同時に作り直して互いの前提を壊す。
+// 単体のパッケージでは通るのに ./... では落ちる、という形で出る。
+//
+// 直列化しても DB を使うテスト全体で数秒なので、実行時間より
+// 「どの順で走っても同じ結果になる」ことを取る。
 func Open(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
 
@@ -72,7 +85,36 @@ func Open(t *testing.T, dsn string) *sql.DB {
 		t.Fatalf("DB に接続できない（server/ で docker compose up -d は済んでいるか）: %v", err)
 	}
 
+	lockSchema(t, conn)
+
 	return conn
+}
+
+// lockSchema はスキーマを触る権利をテスト終了まで確保する。
+//
+// アドバイザリロックはセッション単位で効くため、接続を1本占有する
+// （プールから毎回同じ接続が来る保証は無い）。解放してから返すこと。
+// 解放せずに閉じると、プールに戻った接続がロックを握ったままになる。
+func lockSchema(t *testing.T, conn *sql.DB) {
+	t.Helper()
+
+	ctx := context.Background()
+	pinned, err := conn.Conn(ctx)
+	if err != nil {
+		t.Fatalf("ロック用の接続の確保に失敗: %v", err)
+	}
+
+	if _, err := pinned.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, schemaLockKey); err != nil {
+		_ = pinned.Close()
+		t.Fatalf("アドバイザリロックの取得に失敗: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := pinned.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, schemaLockKey); err != nil {
+			t.Errorf("アドバイザリロックの解放に失敗: %v", err)
+		}
+		_ = pinned.Close()
+	})
 }
 
 // ResetSchema は public スキーマを作り直し、適用済みバージョンごと消す。
