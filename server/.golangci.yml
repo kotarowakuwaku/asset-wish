@@ -50,6 +50,10 @@ linters:
           deny:
             - pkg: "net/http"
               desc: "usecase は HTTP を知らない"
+            - pkg: "database/sql"
+              desc: "トランザクション境界は TxManager 越しに張る。usecase は DB の実体を知らない"
+            - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/db"
+              desc: "sqlc 生成コードを usecase に持ち込まない。変換は adapter/repository の責務"
             - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/adapter"
               desc: "usecase はインターフェースにのみ依存する。実装を import しない"
             - pkg: "github.com/kotarowakuwaku/asset-wish/server/internal/infra"
