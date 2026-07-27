@@ -124,6 +124,13 @@ golangci-lint run              # depguard によるレイヤ境界検証を含�
 sqlc generate                  # クエリからコード生成
 sqlc diff                      # 生成コードが最新かの確認
 
+# ローカル DB（server ディレクトリで）
+docker compose up -d           # postgres:16。CI の services と同じ版
+export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
+goose -dir db/migrations postgres "$DATABASE_URL" up      # マイグレーション適用
+goose -dir db/migrations postgres "$DATABASE_URL" status  # 適用状況
+goose -dir db/migrations postgres "$DATABASE_URL" down    # 1つ戻す
+
 # front
 cd front
 npm run check                  # typecheck + oxlint + vitest + playwright。ループの停止条件
@@ -132,6 +139,8 @@ npx playwright test --ui       # E2E を目視で追う
 ```
 
 `npm run check` が front の検証の入口。個別に走らせるより、まずこれを通す。
+
+ツールの版は `mise.toml` で固定してある（`sqlc` / `goose`）。**`sqlc` の版は `.github/workflows/ci.yml` の `setup-sqlc` と必ず揃えること。** ずれると `sqlc diff` が生成コードの差分ではなく版差を検出して落ちる。
 
 ## ループ協議 — 「完了」の定義
 
@@ -143,6 +152,7 @@ npx playwright test --ui       # E2E を目視で追う
    | 触った場所 | 走らせるもの |
    | --- | --- |
    | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
+   | `server/db/`（スキーマ・クエリ） | 上記に加えて `sqlc generate` → `sqlc diff`、および `DATABASE_URL` を設定した状態での `go test ./db/...` |
    | `front/` | `npm run check`（typecheck + oxlint + vitest + playwright） |
    | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
 
@@ -172,16 +182,46 @@ npx playwright test --ui       # E2E を目視で追う
 
 | 段階 | 内容 | 状態 |
 | --- | --- | --- |
-| 1 | `domain` パッケージとそのテスト | ← 現在ここ |
-| 2 | DDL・マイグレーション・sqlc 設定 | |
+| 1 | `domain` パッケージとそのテスト | 完了（PR #1） |
+| 2 | DDL・マイグレーション・sqlc 設定 | ← 現在ここ |
 | 3 | `repository` 実装 | |
 | 4 | `usecase`・`handler` | |
 | 5 | Terraform / GCP | 実運用したくなった時点で着手 |
 | 6 | front（Vite + React SPA） | |
 
-段階1はインフラを一切用意せずに進む。DB も GCP も立てずに、`domain/networth_test.go` から書き始める。テストケースは `docs/design.md` の 6.1 に15件挙げてある。
+段階2で入った決定は以下。いずれも設計書が決めていなかったもの。
 
-**先にインフラを整えようとしないこと。** アプリの中身に到達する前に消耗する。
+| 項目 | 決定 | 理由 |
+| --- | --- | --- |
+| マイグレーション | `goose`（`server/db/migrations/`） | 1ファイルに up/down を書け、`embed.FS` から呼べる。段階3のテストでスキーマを流すのが数行で済む |
+| sqlc のドライバ | `database/sql` + `pgx/v5` stdlib | `docs/detailed-design.md` 4.1 の型変換表が `sql.NullTime` 前提。ドライバ実体は pgx |
+| 生成コードの置き場 | `server/internal/db/` | `.golangci.yml` の depguard が domain からの import を禁じているパスと一致させる |
+| ローカル DB | `server/compose.yaml` の `postgres:16` | CI の `services.postgres` と同一版。「手元では通るのに CI で落ちる」を構造的に潰す |
+| 更新クエリの粒度 | **操作別に分ける**（全カラム上書きの `Update*` を置かない） | 下記 |
+
+### 更新クエリを操作別に分ける
+
+`UpdateWish` のような全カラム上書きのクエリを置かず、API の操作単位でクエリを割る。
+
+| テーブル | 置くクエリ | 置かないもの |
+| --- | --- | --- |
+| `accounts` | `UpdateAccount`（名称・残高のみ） | `kind` を書けるクエリ |
+| `wishes` | `UpdateWishContent` / `UpdateWishStatus` | 両方を1本で書けるクエリ |
+| `lendings` | `UpdateLendingCollectedAmount` | 内容を編集するクエリ（API に無い） |
+
+**理由は、不変条件を型やレビューではなくスキーマ側で支えるため。**
+
+- `kind` を `cash` → `investment` に書けると、その口座が実質資産から丸ごと消える（不変条件1）
+- `status` を内容更新のついでに書けると、遷移の可否を判定する domain のメソッドを迂回できる（不変条件6）
+- `amount` を回収のついでに書けると、未回収残高（`amount - collected_amount`）の意味が変わる（不変条件4）
+
+**SQL に無い操作は、上の層がどう間違えても起こせない。** 冗長さと引き換えに、迂回路そのものを消す。
+
+作成系（`CreateWish` など）は全カラムを引数に取ったままでよい。初期状態が `considering` であるといったルールは domain が持つべきで、SQL に定数で書き込むと逆にルールが散る。
+
+**新しい更新操作が要るときは、既存の `Update*` に列を足さず、クエリを1本足す。**
+
+**GCP と Terraform は依然として後回し。** アプリの中身に到達する前に消耗する。
 
 ## やらないこと
 

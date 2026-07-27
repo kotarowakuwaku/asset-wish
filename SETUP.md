@@ -292,6 +292,84 @@ GitHub のリポジトリ設定 → Rules → Rulesets（または Settings → 
 
 ---
 
+## 11. ローカル DB を用意する（段階2以降）
+
+段階1（`domain`）までは DB 不要だった。段階2からは要る。
+
+ツールの版は `mise.toml` に固定してある。クローン直後は次で揃う。
+
+```bash
+mise install     # sqlc 1.27.0 / goose 3.27.3
+```
+
+### 11-1. Docker を入れる
+
+WSL2 の Ubuntu に docker engine を入れる。Docker Desktop は要らない。
+
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker "$USER"
+# グループ変更を反映するため WSL を再起動する（PowerShell から wsl --shutdown）
+```
+
+**イメージは `postgres:16` を使う。** Ubuntu 26.04 の apt が入れる PostgreSQL は 18 で、CI の `services.postgres`（16）とずれる。手元と CI でバージョンが違うと、`手元では通るのに CI で落ちる` が起きたときに原因の切り分けができなくなる。Docker を挟むのはこれを避けるため。
+
+### 11-2. 起動してマイグレーションを流す
+
+```bash
+cd server
+docker compose up -d
+
+export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
+goose -dir db/migrations postgres "$DATABASE_URL" up
+goose -dir db/migrations postgres "$DATABASE_URL" status
+```
+
+### 11-3. スキーマが本当に流れるかを検証する
+
+`server/db/embed_test.go` が、まっさらな DB にマイグレーションを適用して戻すところまでを確かめる。
+
+```bash
+go test ./db/...
+```
+
+**`DATABASE_URL` が未設定なら SKIP する。** 段階1までと同じく「DB 無しで `go test ./...` が通る」状態を壊さないため。CI では `services.postgres` と `DATABASE_URL` が用意されているので、そこでは実際に走る。
+
+このテストは `DROP SCHEMA public CASCADE` を実行する。**接続先が localhost でなければ失敗させている。** Neon の本番 URL を export したまま `go test` を打つ事故は、放っておけばいずれ必ず起きるため。
+
+sqlc のパーサを通ることは構文の正しさしか保証しない。CHECK 制約に IMMUTABLE でない関数を書いた、といった意味解析のエラーは実物に流して初めて出る。**ここが段階2の検証ゲートになる。**
+
+資格情報 `test:test` はローカル専用の使い捨て。**本番の接続文字列は環境変数から読む**（`CLAUDE.md` 不変条件17）。`compose.yaml` に書いてよいのは、この値が漏れても何も起きないから。
+
+### 11-4. スキーマを変えたとき
+
+```bash
+goose -dir db/migrations create <名前> sql   # 新しいマイグレーションを作る
+sqlc generate                                # 生成コードを作り直す
+sqlc diff                                    # 差分が無いことを確認（CI と同じ検証）
+```
+
+**生成コード `server/internal/db/` はコミットする。** CI の `sqlc diff` はコミット漏れの検出が目的なので、無視すると意味が消える。
+
+**`docs/design.md` 2.2 の DDL も同時に直すこと。** マイグレーションだけ直すと設計書が嘘になる。
+
+### 11-5. `-race` を手元で走らせる（段階4で必要になる）
+
+CI は `go test -race ./...` を使う。手元で同じものを走らせるには C コンパイラが要る。
+
+```bash
+sudo apt install -y build-essential   # 無いと go test -race が cgo 不足で落ちる
+```
+
+**段階3までは入れなくてよい。** `-race` は複数の goroutine が同じメモリを同期なしで触る箇所を実行時に捕まえるもので、`domain` の純粋関数と逐次実行のマイグレーションテストしか無いうちは検出対象が存在しない。
+
+要るのは**段階4以降**。`net/http` はリクエストごとに goroutine を立てるため、パッケージ変数に状態を持たせた、リポジトリ実装が map を共有した、といったバグがそこで初めて成立する。この種のバグはテストがたまたま緑になるので `-race` 以外では見つからない。**入れないまま段階4に進むと、CI だけが赤くなってログから推測する羽目になる。**
+
+入れると `CGO_ENABLED` の既定が 0 から 1 に変わり、手元の `go build` が動的リンクのバイナリを吐くようになる。デプロイ用のビルドは段階5でコンテナの中でやるため実害は無いが、変わること自体は知っておく。
+
+---
+
 ## セットアップ後：どこから書くか
 
 `server/internal/domain/` から。**DB も GCP も Terraform も不要**で、今すぐ書ける。
