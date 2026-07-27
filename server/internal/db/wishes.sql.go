@@ -147,7 +147,8 @@ func (q *Queries) ListWishesByStatus(ctx context.Context, status string) ([]Wish
 const updateWishContent = `-- name: UpdateWishContent :exec
 
 UPDATE wishes
-SET title = $2, amount = $3, priority = $4, deadline = $5, updated_at = now()
+SET title = $2, amount = $3, category = $4, priority = $5, deadline = $6,
+    updated_at = now()
 WHERE id = $1
 `
 
@@ -155,6 +156,7 @@ type UpdateWishContentParams struct {
 	ID       uuid.UUID
 	Title    string
 	Amount   int64
+	Category string
 	Priority int32
 	Deadline sql.NullTime
 }
@@ -165,13 +167,16 @@ type UpdateWishContentParams struct {
 // 「PATCH で status を渡せば済む」経路を作れてしまい、遷移の可否を
 // 判定する domain のエンティティメソッドを迂回できる（不変条件6）。
 // SQL で書けなければ、そもそも間違えようがない。
-// 内容の更新。PATCH /api/wishes/{id} が触る範囲（design.md 5.1）に対応する。
-// category を含めないのは、item から goal への付け替えが API に無いため。
+// 内容の更新。PATCH /api/wishes/{id} が触る範囲（detailed-design 6.4）に対応する。
+//
+// category は含める。もの・体験・目標の付け替えは、どの不変条件にも
+// 触れない単なる分類の変更なので、status と同じ扱いにする理由が無い。
 func (q *Queries) UpdateWishContent(ctx context.Context, arg UpdateWishContentParams) error {
 	_, err := q.db.ExecContext(ctx, updateWishContent,
 		arg.ID,
 		arg.Title,
 		arg.Amount,
+		arg.Category,
 		arg.Priority,
 		arg.Deadline,
 	)

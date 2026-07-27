@@ -84,6 +84,7 @@ func (r *WishRepository) UpdateContent(ctx context.Context, w domain.Wish) error
 		ID:       w.ID,
 		Title:    w.Title,
 		Amount:   int64(w.Amount),
+		Category: string(w.Category),
 		Priority: int32(w.Priority),
 		Deadline: toNullTime(w.Deadline),
 	})

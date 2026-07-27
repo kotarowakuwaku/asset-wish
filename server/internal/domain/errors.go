@@ -31,4 +31,5 @@ var (
 	ErrInvalidYearMonth          = &DomainError{Code: "INVALID_YEAR_MONTH", Message: "年月の指定が不正です"}
 	ErrInvalidTransactionKind    = &DomainError{Code: "INVALID_TRANSACTION_KIND", Message: "取引種別が不正です"}
 	ErrMissingReference          = &DomainError{Code: "MISSING_REFERENCE", Message: "この取引種別には参照先が必要です"}
+	ErrAccountInUse              = &DomainError{Code: "ACCOUNT_IN_USE", Message: "取引履歴が残っている口座は削除できません"}
 )
