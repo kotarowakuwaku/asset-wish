@@ -29,4 +29,6 @@ var (
 	ErrInvalidTransition         = &DomainError{Code: "INVALID_TRANSITION", Message: "この状態からは実行できない操作です"}
 	ErrCollectExceedsOutstanding = &DomainError{Code: "COLLECT_EXCEEDS_OUTSTANDING", Message: "回収額が未回収残高を超えています"}
 	ErrInvalidYearMonth          = &DomainError{Code: "INVALID_YEAR_MONTH", Message: "年月の指定が不正です"}
+	ErrInvalidTransactionKind    = &DomainError{Code: "INVALID_TRANSACTION_KIND", Message: "取引種別が不正です"}
+	ErrMissingReference          = &DomainError{Code: "MISSING_REFERENCE", Message: "この取引種別には参照先が必要です"}
 )
