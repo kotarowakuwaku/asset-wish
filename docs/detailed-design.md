@@ -883,10 +883,14 @@ VALUES ($1, $2, $3, $4, $5, $6);
 | --- | --- | --- | --- |
 | GET | `/api/accounts` | — | 200 配列 |
 | POST | `/api/accounts` | `{name, kind, balance}` | 201 |
-| PATCH | `/api/accounts/{id}` | `{name?, kind?, balance?}` | 200 |
+| PATCH | `/api/accounts/{id}` | `{name?, balance?}` | 200 |
 | DELETE | `/api/accounts/{id}` | — | 204 |
 
-`kind` は `"cash"` / `"investment"`。不正値は 422（`INVALID_ACCOUNT_KIND`）。
+`kind` は `"cash"` / `"investment"`。作成時の不正値は 422（`INVALID_ACCOUNT_KIND`）。
+
+**PATCH で `kind` は変更できない。** 種別が変わると、その口座が実質資産の計算から丸ごと外れる（不変条件1）。`kind` がボディに含まれていた場合は 400 を返す。黙って無視すると「変えたつもりが変わっていない」状態になるため、送れないと伝える。ウィッシュの `status` と同じ扱い。
+
+**残高を更新したときだけ `updatedAt` が進む。** これは「残高がいつ時点のものか」を表す値で、名称を直しただけで進めると、古い残高が最新に見えて `isStale` による催促が効かなくなる。
 
 口座に紐づく取引が存在する場合、DELETE は 422 を返す（DDL の `ON DELETE RESTRICT` による）。
 

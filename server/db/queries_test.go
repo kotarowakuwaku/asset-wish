@@ -242,8 +242,10 @@ func TestWishContentAndStatusAreSeparate(t *testing.T) {
 	}
 
 	// 内容だけ更新しても status は動かない。
+	// category は内容の一部として更新できる（detailed-design 6.4）。
 	if err := q.UpdateWishContent(ctx, db.UpdateWishContentParams{
-		ID: id, Title: "旅行（行き先変更）", Amount: 150000, Priority: 2,
+		ID: id, Title: "旅行（行き先変更）", Amount: 150000,
+		Category: "goal", Priority: 2,
 		Deadline: sql.NullTime{Valid: false},
 	}); err != nil {
 		t.Fatalf("内容の更新に失敗: %v", err)
@@ -262,8 +264,8 @@ func TestWishContentAndStatusAreSeparate(t *testing.T) {
 	if got.Deadline.Valid {
 		t.Error("deadline の解除が反映されていない")
 	}
-	if got.Category != "experience" {
-		t.Errorf("category は内容更新の対象外のはず: got %q", got.Category)
+	if got.Category != "goal" {
+		t.Errorf("category も内容更新で反映されるはず: got %q", got.Category)
 	}
 
 	// 状態だけ更新しても内容は動かない。

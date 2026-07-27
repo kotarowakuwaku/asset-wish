@@ -113,6 +113,7 @@ func TestWishRepository_UpdateContentKeepsStatus(t *testing.T) {
 	w.Status = domain.WishDone
 	w.Title = "旅行（行き先変更）"
 	w.Amount = 150000
+	w.Category = domain.WishCategoryExperience
 	w.Priority = 3
 	if err := repo.UpdateContent(ctx, w); err != nil {
 		t.Fatalf("UpdateContent: %v", err)
@@ -127,6 +128,10 @@ func TestWishRepository_UpdateContentKeepsStatus(t *testing.T) {
 	}
 	if got.Title != "旅行（行き先変更）" || got.Amount != 150000 || got.Priority != 3 {
 		t.Errorf("内容が反映されていない: %+v", got)
+	}
+	// category は分類の変更なので内容更新で動いてよい（detailed-design 6.4）。
+	if got.Category != domain.WishCategoryExperience {
+		t.Errorf("Category=%s want experience", got.Category)
 	}
 }
 

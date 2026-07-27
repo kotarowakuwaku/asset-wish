@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	sqlc "github.com/kotarowakuwaku/asset-wish/server/internal/db"
 	"github.com/kotarowakuwaku/asset-wish/server/internal/domain"
@@ -78,11 +79,28 @@ func (r *AccountRepository) Update(ctx context.Context, a domain.Account) error 
 	return nil
 }
 
+// Delete は口座を削除する。
+//
+// 取引履歴が残っている口座は DDL の ON DELETE RESTRICT で拒まれる。
+// これを domain.ErrAccountInUse に翻訳して、handler が 422 に対応
+// させられるようにする（detailed-design 6.2）。DB 固有のエラーコードを
+// 知ってよいのはこの層まで。
 func (r *AccountRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	if err := r.store.queries(ctx).DeleteAccount(ctx, id); err != nil {
+	err := r.store.queries(ctx).DeleteAccount(ctx, id)
+	if isForeignKeyViolation(err) {
+		return domain.ErrAccountInUse
+	}
+	if err != nil {
 		return fmt.Errorf("口座の削除に失敗: %w", err)
 	}
 	return nil
+}
+
+// isForeignKeyViolation は外部キー制約違反かどうかを判定する。
+// 23503 は PostgreSQL の foreign_key_violation。
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
 // toDomainAccount は sqlc 生成型をドメインエンティティに詰め替える。
