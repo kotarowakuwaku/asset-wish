@@ -3,10 +3,10 @@ package migrations_test
 import (
 	"testing"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
 	migrations "github.com/kotarowakuwaku/asset-wish/server/db"
+	"github.com/kotarowakuwaku/asset-wish/server/internal/dbtest"
 )
 
 // TestMigrationsUpDown は DDL が実際の PostgreSQL に適用でき、
@@ -16,9 +16,9 @@ import (
 // IMMUTABLE でない関数を書いた、といった意味解析のエラーは実物に
 // 流して初めて出る。ここが段階2の検証ゲートになる。
 func TestMigrationsUpDown(t *testing.T) {
-	conn := openDB(t, requireLocalDSN(t))
-	resetSchema(t, conn)
-	applyMigrations(t, conn)
+	conn := dbtest.Open(t, dbtest.RequireLocalDSN(t))
+	dbtest.ResetSchema(t, conn)
+	dbtest.ApplyMigrations(t, conn)
 
 	// 設計書 2.2 のテーブルが揃っていること。
 	// goose が「成功した」と言っても、空のマイグレーションを
@@ -55,7 +55,7 @@ func TestMigrationsUpDown(t *testing.T) {
 // 設計判断（design.md 2.3）を DB 側が支えているかの確認。
 // 制約が黙って外れても、Go 側のテストだけでは気付けない。
 func TestMonthlyBalanceFirstDayConstraint(t *testing.T) {
-	conn := setupDB(t)
+	conn := dbtest.Setup(t)
 
 	const insert = `INSERT INTO monthly_balances (id, year_month, income, expense)
 	                VALUES (gen_random_uuid(), $1, 0, 0)`

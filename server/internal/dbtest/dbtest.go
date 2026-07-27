@@ -1,4 +1,12 @@
-package migrations_test
+// Package dbtest は、実物の PostgreSQL を使うテストの下ごしらえを提供する。
+//
+// db パッケージ（マイグレーションと生成クエリの検証）と
+// adapter/repository のテストが共有する。テストからのみ import される
+// 前提で testing を受け取る。
+//
+// 本番のコードパスからは使わない。cmd/ や internal/adapter から
+// import してはならない。
+package dbtest
 
 import (
 	"database/sql"
@@ -6,35 +14,27 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql に pgx を登録する
 	"github.com/pressly/goose/v3"
 
 	migrations "github.com/kotarowakuwaku/asset-wish/server/db"
 )
 
-// このファイルは db パッケージのテストが共有する下ごしらえ。
-// embed_test.go（スキーマが流れるかの検証）と queries_test.go
-// （生成クエリの検証）の両方から使う。
-//
-// 段階3で repository のテストが3つ目の利用者になったら、
-// テスト用パッケージとして切り出すことを検討する。利用者が2つの
-// うちは、同じテストパッケージ内の関数で足りる。
-
 // localHosts は破壊的なテストを許可する接続先。
 //
-// このテストは public スキーマを丸ごと落とす。DATABASE_URL の向き先を
-// 間違えたときの被害が取り返しのつかない種類なので、ローカル以外は
-// 明示的に拒否する。Neon の本番 URL を export したまま go test を
-// 打つ事故は、いずれ必ず起きる。
+// ここでのテストは public スキーマを丸ごと落とす。DATABASE_URL の
+// 向き先を間違えたときの被害が取り返しのつかない種類なので、
+// ローカル以外は明示的に拒否する。Neon の本番 URL を export した
+// まま go test を打つ事故は、いずれ必ず起きる。
 var localHosts = map[string]bool{
 	"localhost": true,
 	"127.0.0.1": true,
 	"::1":       true,
 }
 
-// requireLocalDSN は DATABASE_URL を返す。未設定ならテストをスキップし、
+// RequireLocalDSN は DATABASE_URL を返す。未設定ならテストをスキップし、
 // ローカル以外を指していれば失敗させる。
-func requireLocalDSN(t *testing.T) string {
+func RequireLocalDSN(t *testing.T) string {
 	t.Helper()
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -58,8 +58,8 @@ func requireLocalDSN(t *testing.T) string {
 	return dsn
 }
 
-// openDB は接続を開き、実際に到達できることまで確かめる。
-func openDB(t *testing.T, dsn string) *sql.DB {
+// Open は接続を開き、実際に到達できることまで確かめる。
+func Open(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
 
 	conn, err := sql.Open("pgx", dsn)
@@ -75,9 +75,9 @@ func openDB(t *testing.T, dsn string) *sql.DB {
 	return conn
 }
 
-// resetSchema は public スキーマを作り直し、適用済みバージョンごと消す。
+// ResetSchema は public スキーマを作り直し、適用済みバージョンごと消す。
 // テストが前回の残骸に依存しないようにするため。
-func resetSchema(t *testing.T, conn *sql.DB) {
+func ResetSchema(t *testing.T, conn *sql.DB) {
 	t.Helper()
 
 	if _, err := conn.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
@@ -85,8 +85,8 @@ func resetSchema(t *testing.T, conn *sql.DB) {
 	}
 }
 
-// applyMigrations は埋め込んだ SQL を適用する。
-func applyMigrations(t *testing.T, conn *sql.DB) {
+// ApplyMigrations は埋め込んだ SQL を適用する。
+func ApplyMigrations(t *testing.T, conn *sql.DB) {
 	t.Helper()
 
 	goose.SetBaseFS(migrations.FS)
@@ -98,16 +98,16 @@ func applyMigrations(t *testing.T, conn *sql.DB) {
 	}
 }
 
-// setupDB はまっさらなスキーマにマイグレーションを流した接続を返す。
+// Setup はまっさらなスキーマにマイグレーションを流した接続を返す。
 //
 // テストごとに作り直すのは、実行順序に依存するテストを書けなくするため。
 // 前のテストが残したレコードにたまたま助けられている状態を作らない。
-func setupDB(t *testing.T) *sql.DB {
+func Setup(t *testing.T) *sql.DB {
 	t.Helper()
 
-	conn := openDB(t, requireLocalDSN(t))
-	resetSchema(t, conn)
-	applyMigrations(t, conn)
+	conn := Open(t, RequireLocalDSN(t))
+	ResetSchema(t, conn)
+	ApplyMigrations(t, conn)
 
 	return conn
 }

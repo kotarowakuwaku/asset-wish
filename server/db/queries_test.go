@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kotarowakuwaku/asset-wish/server/internal/db"
+	"github.com/kotarowakuwaku/asset-wish/server/internal/dbtest"
 )
 
 // sqlc の生成クエリが実物の PostgreSQL 上で意図どおりに振る舞うかの検証。
@@ -17,16 +18,14 @@ import (
 // 静的に弾くため、ここで確かめたいのはそれ以外——制約が実際に効くか、
 // ON CONFLICT や FK がどう振る舞うか——に絞る。
 //
-// このファイルが db パッケージ側にあるのは、スキーマを流す下ごしらえ
-// （helper_test.go）を embed_test.go と共有するため。テスト対象は
-// internal/db の生成コードで、ドメイン型は一切登場しない。詰め替えは
-// 段階3の adapter/repository の責務（不変条件7）。
+// テスト対象は internal/db の生成コードで、ドメイン型は一切登場しない。
+// 詰め替えは adapter/repository の責務（不変条件7）。
 //
 // 値はすべて架空のもの（不変条件17）。
 
 func newQueries(t *testing.T) (*db.Queries, context.Context) {
 	t.Helper()
-	return db.New(setupDB(t)), context.Background()
+	return db.New(dbtest.Setup(t)), context.Background()
 }
 
 // date は DATE カラム用の時刻を作る。タイムゾーンを混ぜると
