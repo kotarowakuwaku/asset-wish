@@ -30,8 +30,9 @@
 
 | 領域 | 技術 |
 | --- | --- |
-| フロント | Expo / React Native (TypeScript)、Expo Router |
-| 配信 | Expo Go + EAS Update（App Store には出さない） |
+| フロント | Vite + React + TypeScript（SPA） |
+| フロントのテスト | Vitest（ロジック）、Playwright（E2E）、oxlint |
+| 配信 | 静的ホスティング（着手時に確定）。ネイティブアプリとしては配布しない |
 | サーバー | Go |
 | DB | PostgreSQL（Neon 無料枠） |
 | クエリ | sqlc（ORM は使わない） |
@@ -43,11 +44,35 @@
 モノレポ。
 
 ```
-front/     Expo / React Native
+front/     Vite + React + TypeScript
 server/    Go（go.mod はこの階層）
 infra/     Terraform
 docs/      要件定義書・設計書
 ```
+
+## 命名規約
+
+### ブランチ
+
+以下のプレフィクスに絞る。迷ったら `feat/`。
+
+| prefix | 用途 |
+| --- | --- |
+| `feat/` | 新機能 |
+| `fix/` | バグ修正 |
+| `refactor/` | 挙動を変えない改修 |
+| `docs/` | ドキュメントのみ |
+| `chore/` | ビルド・CI・依存関係など |
+
+例：`feat/domain-networth`
+
+### コミットメッセージ
+
+ブランチと同じプレフィクスを使い、`prefix: 要約` の形にする。日本語でよい。詳細が必要な場合は本文で補足する。
+
+例：
+- `feat: domain 層に Money/YearMonth と実質資産計算を追加`
+- `docs: MonthsToReach の切り上げ除算を明記`
 
 ---
 
@@ -82,7 +107,7 @@ docs/      要件定義書・設計書
 
 15. **月額0円を厳守する。** 有料プラン・有料サービスを前提とした提案をしない。無料枠を超える構成を導入しない。
 16. **Cloud Run は `max_instance_count` を必ず明示する。** 既定値は100であり、絞らないと課金が青天井になる。
-17. **秘密情報をリポジトリに入れない。** 接続文字列・トークンは環境変数から読む。`internal/infra/config.go` に集約する。
+17. **秘密情報をリポジトリに入れない。** 接続文字列・トークンは環境変数から読む。`internal/infra/config.go` に集約する。**このリポジトリは public。** 1度 push したものは bot に数秒で拾われ、履歴から消しても手遅れになる。実データ（金額・口座名・人名）もコードやドキュメントに書かない。テストで使う値はすべて架空のものにする。
 
 ---
 
@@ -101,10 +126,45 @@ sqlc diff                      # 生成コードが最新かの確認
 
 # front
 cd front
-npx tsc --noEmit
-npx eslint .
-npx expo start
+npm run check                  # typecheck + oxlint + vitest + playwright。ループの停止条件
+npm run dev                    # 開発サーバー
+npx playwright test --ui       # E2E を目視で追う
 ```
+
+`npm run check` が front の検証の入口。個別に走らせるより、まずこれを通す。
+
+## ループ協議 — 「完了」の定義
+
+**チェックが緑になっていない状態を「完了」と呼んではならない。** 以下を1周として回す。
+
+1. 変更を書く
+2. 触った領域のチェックを走らせる
+
+   | 触った場所 | 走らせるもの |
+   | --- | --- |
+   | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
+   | `front/` | `npm run check`（typecheck + oxlint + vitest + playwright） |
+   | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
+
+3. 落ちたら、出力を最後まで読み、**原因を1文で言語化してから**直して 2 に戻る
+4. 周回は最大5回
+
+### 停止条件
+
+| 状況 | 振る舞い |
+| --- | --- |
+| 全チェック通過 | 「完了」と報告する。**チェックの出力を証拠として添える** |
+| 5周を使い切った | 何が残っているか、何を試して駄目だったかを報告して止まる |
+| 同じエラーが2周続いた | 自力で粘らず `fixer` サブエージェントを呼ぶ |
+
+### 禁止
+
+- チェックの出力を示さずに「完了」と報告する
+- テストの削除・スキップ・アサーションの緩和で緑にする
+- `.golangci.yml` の depguard を緩めてレイヤ違反を通す（不変条件5）
+- 「本質的でない」としてチェックを回さずに済ませる
+
+1周で触る範囲は原則1パッケージまで。範囲が広いほど、落ちたときに原因を特定できなくなる。
 
 ## 開発の進め方
 
@@ -117,7 +177,7 @@ npx expo start
 | 3 | `repository` 実装 | |
 | 4 | `usecase`・`handler` | |
 | 5 | Terraform / GCP | 実運用したくなった時点で着手 |
-| 6 | front（Expo） | |
+| 6 | front（Vite + React SPA） | |
 
 段階1はインフラを一切用意せずに進む。DB も GCP も立てずに、`domain/networth_test.go` から書き始める。テストケースは `docs/design.md` の 6.1 に15件挙げてある。
 

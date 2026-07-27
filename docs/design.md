@@ -10,17 +10,19 @@
 | 対象範囲 | データモデル、ドメイン層、API、パッケージ構成、テスト方針 |
 | 対象外 | Terraform コード、画面ワイヤーフレーム（別途） |
 
+> **注記：** 本書は概観・方針レベルの設計。実装時のシグネチャ・エラーコード・テストケースは `docs/detailed-design.md` を正とする。両者に齟齬があれば詳細設計書に従う。
+
 ---
 
 ## 1. 全体構成
 
 ```
 ┌──────────────┐   HTTPS    ┌──────────────┐          ┌──────────┐
-│  Expo Go     │ ─────────▶ │  Cloud Run   │ ───────▶ │  Neon    │
-│  (front)     │            │  (server/Go) │          │ Postgres │
+│  ブラウザ    │ ─────────▶ │  Cloud Run   │ ───────▶ │  Neon    │
+│  (front/SPA) │            │  (server/Go) │          │ Postgres │
 └──────────────┘            └──────────────┘          └──────────┘
       ▲                            ▲
-      │ eas update                 │ deploy
+      │ 静的ホスティング           │ deploy
       │                            │
 ┌─────────────────────────────────────────────┐
 │  GitHub（モノレポ） / GitHub Actions        │
@@ -150,7 +152,43 @@ func (m Money) IsZero() bool       { return m == 0 }
 
 `int64` の型エイリアスにメソッドを生やす形とする。構造体にしないのは、ゼロ値がそのまま「0円」として意味を持ち、比較演算子がそのまま使えるため。通貨が複数になったら構造体に変える。
 
-### 3.2 エンティティ
+### 3.2 YearMonth
+
+月単位の識別子。`time.Time` を裸で扱うと以下の事故が避けられない。
+
+- 月初以外の日（`2026-07-15` など）を代入できてしまう
+- タイムゾーンが持ち込まれる。JST の月初は UTC では前月末日になり、DB との変換で必ず事故る
+- 比較・ソートの意味が曖昧になる（同じ月でも時刻が違えば `!=`）
+
+Money を `int64` の裸で扱わないのと同じ理由で、専用の値オブジェクトにする。
+
+```go
+package domain
+
+type YearMonth struct {
+    year  int
+    month time.Month
+}
+
+// 月が [1, 12] の範囲外なら ErrInvalidYearMonth。
+func NewYearMonth(y int, m time.Month) (YearMonth, error)
+
+func (ym YearMonth) Year() int         { return ym.year }
+func (ym YearMonth) Month() time.Month { return ym.month }
+
+// "2026-07" 形式。
+func (ym YearMonth) String() string
+
+// 年月の昇順比較。
+func (ym YearMonth) Before(o YearMonth) bool
+
+// n ヶ月加算（n が負なら減算）。繰り上がり・繰り下がりを含む。
+func (ym YearMonth) AddMonths(n int) YearMonth
+```
+
+**非公開フィールド + コンストラクタの意図：** 不正な値を持つインスタンスを構造的に作れなくする。タイムゾーンを型に持ち込まない。等値比較は値レシーバなので `==` がそのまま使える。DB との変換（月初 DATE ⇔ YearMonth）は `adapter/repository` の責務。
+
+### 3.3 エンティティ
 
 ```go
 type AccountKind string
@@ -232,7 +270,25 @@ func (w Wish) IsCommitment() bool {
 }
 ```
 
-### 3.3 状態遷移
+```go
+type MonthlyBalance struct {
+    ID        uuid.UUID
+    YearMonth YearMonth
+    Income    Money
+    Expense   Money
+}
+
+// Income / Expense が負なら ErrNegativeAmount、ym がゼロ値なら ErrInvalidYearMonth。
+// 詳細は detailed-design.md 2.7 を参照。
+func NewMonthlyBalance(id uuid.UUID, ym YearMonth, income, expense Money) (MonthlyBalance, error)
+
+// 月間余剰。負にもなり得る（支出過多）。
+func (m MonthlyBalance) Surplus() Money { return m.Income.Sub(m.Expense) }
+```
+
+各エンティティにはコンストラクタを設け、不正な値を持つ構造体を作れないようにする。フィールドは公開のまま置くが、生成経路はコンストラクタに一本化する（Go 慣用に沿わせつつ、DDL の CHECK 制約と対をなす）。`UpdatedAt` を持たないのは、ドメインが判断に用いない値だから。`Account` が `UpdatedAt` を持つのは、残高の古さが催促表示の判断材料だからで、**ドメインが判断に使うかどうかが基準**となる。
+
+### 3.4 状態遷移
 
 **遷移ルールはエンティティのメソッドに閉じ込める。** usecase 層は「どの遷移を起こしたいか」だけを知り、その遷移が許されるかは知らない。
 
@@ -276,7 +332,7 @@ func (w *Wish) Drop() error {
 
 完了と見送りは終端状態。取り消しは行わない（誤操作は削除して作り直す）。
 
-### 3.4 計算ロジック
+### 3.5 計算ロジック
 
 **本アプリの中核。外部依存を一切持たない純粋関数として実装する。**
 
@@ -312,9 +368,18 @@ func CalculateShortfall(wish Wish, netAsset Money) Money
 // データが 0 件なら ok=false。
 func AverageSurplus(balances []MonthlyBalance, months int) (Money, bool)
 
-// 到達見込み月数。平均余剰が 0 以下、または不足額が 0 以下なら ok=false。
-func MonthsToReach(shortfall Money, avgSurplus Money) (int, bool)
+// 到達見込み月数。切り上げ除算。
+// 平均余剰が 0 以下、または不足額が 0 以下（既に達成）なら ok=false。
+// 浮動小数点は使わない。金額計算に float を持ち込むと型の一貫性が崩れる。
+func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
+    if shortfall <= 0 || avgSurplus <= 0 {
+        return 0, false
+    }
+    return int((shortfall + avgSurplus - 1) / avgSurplus), true
+}
 ```
+
+`(a + b - 1) / b` は正の整数に対する切り上げ除算。ちょうど割り切れる場合（例：不足120万 ÷ 月余剰20万 = 6.0）も6を返す。テストは割り切れるケースと割り切れないケースの両方を必ず含める。境界を1つ間違えると全部ずれる。
 
 `AverageSurplus` に渡す `balances` は **年月の降順にソート済み**であることを前提とする。ソートは呼び出し側（usecase）の責務。
 
@@ -359,7 +424,7 @@ func MonthsToReach(shortfall Money, avgSurplus Money) (int, bool)
 
 **`GET /api/dashboard`**
 
-モバイルからのラウンドトリップを減らすため、トップ画面に必要な値をまとめて返す。
+ラウンドトリップを減らすため、トップ画面に必要な値をまとめて返す。
 
 ```json
 {
@@ -422,7 +487,9 @@ func MonthsToReach(shortfall Money, avgSurplus Money) (int, bool)
 
 単一ユーザーのため、環境変数に設定した固定トークンを `Authorization: Bearer <token>` で検証する方式とする。ユーザー管理・パスワード・セッションは実装しない。
 
-Cloud Run のサービスは公開（未認証呼び出し許可）とし、認可はアプリケーション側で行う。トークンは端末のセキュアストレージに保管する。
+Cloud Run のサービスは公開（未認証呼び出し許可）とし、認可はアプリケーション側で行う。トークンはブラウザの `localStorage` に保管する。XSS があれば読まれる置き場所だが、単一ユーザーかつ自分の端末のみという前提のもとで許容する（要件定義書 6章）。
+
+front は別オリジンから API を呼ぶため、CORS の許可オリジンを環境変数で受け取る。ワイルドカードは使わない。
 
 ---
 
@@ -505,8 +572,18 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | usecase | 手書きの fake リポジトリ | オーケストレーション、トランザクション境界 |
 | handler | `net/http/httptest` | ステータスコード、JSON 形式 |
 | repository | 実 DB（ローカル Postgres） | SQL の正しさ、制約 |
+| front（ロジック） | Vitest | 表示整形、入力バリデーション |
+| front（E2E） | Playwright | 主要導線が実際に動くこと |
 
 モックライブラリは導入せず、インターフェースを手書きの fake で満たす。定義したインターフェースが実装しやすいかどうかが、そのまま設計の良し悪しのフィードバックになるため。
+
+front 側は、上記すべてを単一のコマンドに束ねる。開発を AI エージェントのループで進めるため、**エージェントに渡す停止条件が一本のコマンドで表現できること**を要件とする（要件定義書 7.2）。
+
+```json
+"check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
+```
+
+計算ロジックの正しさはサーバー側（domain のユニットテスト）で担保済みである。front の E2E で計算結果を再検証しない。E2E は導線 — 登録できる、一覧に出る、状態遷移のボタンが効く — に絞る。ここを混ぜると、遅くて壊れやすいテストで同じことを二度検証することになる。
 
 ### 6.1 最初に書くべきテストケース
 
@@ -529,8 +606,12 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | 13 | 到達見込み：不足額が0以下 | ok=false（既に達成済み） |
 | 14 | 状態遷移：完了から確定へ | エラー |
 | 15 | 回収：未回収残高を超える額 | エラー |
+| 16 | 到達見込み：ちょうど割り切れる（例：120万 ÷ 月余剰20万） | 6 |
+| 17 | 到達見込み：割り切れない（例：121万 ÷ 月余剰20万） | 7（切り上げ） |
 
 ケース2、6、7は、要件定義書 3.1 の「二重計上しない」「投資は別枠」というルールが守られているかを直接検証するもの。ここが壊れるとアプリの存在意義が消えるため、最優先で書く。
+
+ケース16、17は切り上げ除算の境界検証。片方だけだと `(a + b - 1) / b` の `- 1` を落としても気付けない。両方あってはじめて off-by-one を検出できる。
 
 ---
 
@@ -543,6 +624,6 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | 3 | `repository` 実装とテスト | 同上 |
 | 4 | `usecase`、`handler` | — |
 | 5 | Terraform（Cloud Run / Artifact Registry / 予算アラート / GCS backend） | GCP プロジェクト |
-| 6 | front（Expo） | API が動くこと |
+| 6 | front（Vite + React SPA） | API が動くこと |
 
 段階1はインフラを一切用意せずに進められる。**先に Terraform や GCP の設定から入ると、アプリの中身に到達する前に消耗しやすい。** ドメイン層が固まってからインフラに向かう順序を推奨する。

@@ -1,0 +1,7 @@
+/* 段階6で本実装する。いまは仮の画面のみ。 */
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}

@@ -62,17 +62,24 @@ ssh -T git@github-personal
 
 ```
 [user]
-  name = Kotaro
-  email = 個人のメールアドレス
+  name = kotarowakuwaku
+  email = 103411974+kotarowakuwaku@users.noreply.github.com
 ```
 
 **末尾のスラッシュは必須**（配下すべてに適用する意味）。
+
+**メールアドレスには GitHub の noreply アドレスを使う。** このリポジトリは public であり、コミットの Author はそのまま公開される。実アドレスを入れると `git log` から誰でも読める。noreply でも GitHub 上の紐付け（コントリビューショングラフ、アバター表示）は正しく働く。
+
+自分の noreply アドレスは GitHub の Settings → Emails で確認できる（`<ID>+<ユーザー名>@users.noreply.github.com` の形式）。同じ画面で以下も有効にしておく。
+
+- **Keep my email addresses private**
+- **Block command line pushes that expose my email** — 実アドレスでコミットした場合に push 自体を止めてくれる。事故を後から履歴書き換えで直すのは高くつくので、入口で止める
 
 ---
 
 ## 2. GitHub でリポジトリを作る
 
-個人アカウントで、**Private** で作成する。
+個人アカウントで、**Public** で作成する。
 
 - リポジトリ名：任意（例 `asset-wish`）
 - README、.gitignore、ライセンス：**いずれも追加しない**（こちらで用意したものを置くため）
@@ -82,8 +89,30 @@ ssh -T git@github-personal
 ```bash
 gh auth status          # どのアカウントがアクティブか確認
 gh auth switch          # 違っていれば切り替え
-gh repo create asset-wish --private
+gh repo create asset-wish --public
 ```
+
+### なぜ public か
+
+**GitHub Actions の実行時間が無制限で無料になる。** private だと Free プランは月2,000分で、しかもジョブごとに分単位で切り上げられる。このプロジェクトは AI エージェントにループを回させる前提であり、CI を回す回数が読めない。分数を気にしながら検証を削るのは本末転倒なので、public を選ぶ。
+
+副次的に、**secret scanning と push protection が無料で使える**（有効化は後述）。
+
+### public であることの代償
+
+**秘密情報の事故が即座に致命的になる。** private なら気付いて消せば済むが、public リポジトリは bot が数秒でスクレイプする。このアプリは最終的に自分の資産額を扱い、認証は環境変数の固定トークン1本（設計書 4.5）なので、**それが1度でも漏れたら他人に資産を読まれる。**
+
+そのため、以下を必ず有効にする。
+
+```bash
+gh api -X PATCH repos/<自分のアカウント>/asset-wish \
+  -f 'security_and_analysis[secret_scanning][status]=enabled' \
+  -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
+```
+
+**push protection が本命。** 検出ではなく、そもそも push させない。`.gitignore` は「うっかり `git add .` した」を防げないが、これは防げる。
+
+コードとドキュメントには実データを一切置かない。金額も口座名も人名も、すべて DB 側にある。この境界を崩さない限り、public であることのリスクは秘密情報の事故だけに閉じる。
 
 ## 3. ローカルに用意する
 
@@ -119,9 +148,15 @@ asset-wish/
 ├── .gitignore                                   ← そのまま配置
 ├── SETUP.md                                     ← この文書
 ├── .claude/
-│   └── skills/
-│       └── architecture-review/
-│           └── SKILL.md
+│   ├── settings.json                            ← フックの登録
+│   ├── skills/
+│   │   └── architecture-review/
+│   │       └── SKILL.md
+│   ├── hooks/
+│   │   ├── check-go-fast.sh                     ← 実行権限を付けること
+│   │   └── check-go-full.sh
+│   └── agents/
+│       └── fixer.md
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -182,18 +217,48 @@ rm internal/domain/tmp_check.go
 brew install golangci-lint
 ```
 
-## 8. front を初期化する
+## 8. front（構築済み。クローン後に必要な作業のみ）
 
-段階6（front 実装）に入るまで後回しでよいが、先に作っておいても害はない。
+Vite + React + TypeScript の SPA として構築済み。リポジトリをクローンした環境では以下を行う。
 
 ```bash
-cd ../
-npx create-expo-app@latest front
+cd front
+npm ci
+npx playwright install chromium
 ```
 
-Expo Router がテンプレートに含まれていることを確認する。**web 出力への展開余地を残すため、ルーティングは Expo Router を使う**（`docs/design.md` および `docs/requirements.md` 7.2 参照）。
+### Linux / WSL では OS 側のライブラリも要る
 
-EAS の初期化（`npx eas-cli@latest init`）は Expo アカウントが必要になるため、実際に端末で動かす段階まで不要。
+`npx playwright install chromium` はブラウザ本体を落とすだけで、それが依存する共有ライブラリ（`libnspr4` など）は入らない。無いと `error while loading shared libraries: libnspr4.so` で起動に失敗する。**sudo が要るため手動で実行する。**
+
+```bash
+sudo npx playwright install-deps chromium
+```
+
+macOS では不要。CI では `--with-deps` を付けているので自動で入る。
+
+### 検証は `npm run check` 一本
+
+```json
+"scripts": {
+  "dev": "vite",
+  "build": "tsc -b && vite build",
+  "preview": "vite preview --port 4173 --strictPort",
+  "typecheck": "tsc -b --noEmit",
+  "lint": "oxlint",
+  "test": "vitest run",
+  "e2e": "playwright test",
+  "check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
+}
+```
+
+**個別のコマンドを覚えるのではなく、これ一本を通す。** `npm run check` は CI の front ジョブと同一で、AI エージェントにループを回させるときの停止条件でもある（`CLAUDE.md` のループ協議、`docs/requirements.md` 7.2）。**ローカルと CI で検証内容をずらさないこと。** ずれた瞬間に「手元では通る」が始まる。
+
+linter は eslint ではなく **oxlint**。Vite のテンプレートが同梱しており、eslint より桁違いに速い。lint はループの1周ごとに走るため、ここの実行時間が周回速度に直結する（`docs/requirements.md` 9.1 #12）。
+
+E2E は dev サーバーではなく `npm run build && npm run preview` の成果物に対して実行する。実際に配信するのはビルド結果なので、検証対象を本番と揃える。
+
+スマートフォンのホーム画面に置きたくなったら、`vite-plugin-pwa` で manifest と Service Worker を後付けする。現時点では不要。
 
 ## 9. 最初のコミットと push
 
@@ -212,9 +277,18 @@ git push -u origin main
 GitHub のリポジトリ設定 → Rules → Rulesets（または Settings → Branches）で、`main` に対して以下を設定する。
 
 - 直接 push を禁止し、Pull Request を必須にする
-- ステータスチェック（CI）の成功を必須にする
+- ブランチの削除と force push を禁止する
+- **必須ステータスチェックには `ci` を指定する。** 個別のジョブ名（`server` / `front`）を指定しない
 
 レビュアーが自分ひとりでも PR を挟む意味はある。差分を通しで読む機会が強制的に作られることと、判断の経緯が後から追えるようになること。
+
+### 必須チェックに `ci` を使う理由
+
+`server` / `front` / `infra` は paths フィルタで skip されうる。一方で `changes`（paths-filter そのもの）を必須にすると、**テストが落ちていてもマージできてしまう。** 実際に一度この状態になっていた。
+
+そこで、全ジョブの結果を集約する `ci` ジョブを置き、保護ルールからはこれだけを参照する。skip は通過扱い、それ以外の非 success は落とす。
+
+**CI にジョブを追加したら、`ci` ジョブの `needs` にも必ず足すこと。** 忘れるとそのジョブは保護の対象外になり、静かに検証の網から漏れる。落ちているのに気付けない検証は、無いより悪い。
 
 ---
 
@@ -239,11 +313,27 @@ go test ./internal/domain/...
 
 ### CI の構成
 
-- `dorny/paths-filter` で `server` / `front` / `infra` の変更を判定し、該当するジョブだけ走らせる。EAS のビルド無料枠（月15回）を無駄に消費しないための構成
+- `dorny/paths-filter` で `server` / `front` / `infra` の変更を判定し、該当するジョブだけ走らせる。E2E はブラウザを起動するぶん時間がかかるため、front を触っていない PR で回さない意味は大きい
+- **`permissions: pull-requests: read` は必須。** 既定の `GITHUB_TOKEN` は `contents:read` のみに絞られており、これが無いと paths-filter が PR の変更ファイル一覧を取れず `Resource not accessible by integration` で初手から落ちる
 - `sqlc diff` は生成コードのコミット漏れを検出する。事故が多いので入れてある
 - `infra` ジョブは `terraform validate` までで、`plan` や `apply` は行わない。認証情報を CI に持たせないため
 
 Terraform に着手するまで `infra` ジョブは走らない。
+
+**まだ存在しない設定ファイルを前提にしたステップは、`hashFiles` で条件付きにしてある。** 現時点では `sqlc diff`（`server/sqlc.yaml` 待ち）と front の `check`（`front/playwright.config.ts` 待ち）がこれに当たる。無条件に走らせると CI が常時赤になり、「CI が赤いのはいつものこと」という状態に慣れてしまう。**検証ゲートは、赤が意味を持つ状態に保たなければ機能しない。**
+
+### ループを回す前提の構成
+
+`.claude/` に以下を置いてある。AI エージェントに作業させる際、人手を介さずに検証が回るようにするためのもの。
+
+| ファイル | 役割 |
+| --- | --- |
+| `.claude/settings.json` | フックの登録 |
+| `.claude/hooks/check-go-fast.sh` | `Write`/`Edit` の直後に `gofmt` と `go build`。壊れたまま先に進ませない |
+| `.claude/hooks/check-go-full.sh` | 作業を終えようとした瞬間に `go test` / `go vet` / `golangci-lint`。落ちていれば差し戻す |
+| `.claude/agents/fixer.md` | 同じエラーで2周足踏みしたときに呼ぶ、別コンテキストの担当 |
+
+`CLAUDE.md` の「ループ協議」が完了の定義（＝チェックが緑であること）を担い、フックがそれを機械的に強制する。**片方だけでは効かない。** 規約だけならエージェントは自己申告で完了を宣言できてしまうし、フックだけでは何を直すべきかの方針が伝わらない。
 
 ### レビュースキルの使い方
 
