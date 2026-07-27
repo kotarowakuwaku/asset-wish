@@ -1,7 +1,9 @@
 # golangci-lint v2 系の設定形式。
 # v1 を使う場合は linters.settings ではなくトップレベルの settings に置く。
 #
-# ★ github.com/kotarowakuwaku/asset-wish/server を実際の module パス（go.mod の module 行）に置換すること。
+# depguard の pkg に書くパスは go.mod の module 行に追随させること。
+# module パスを変えたらここも直す。ずれても lint は通ってしまい、
+# レイヤ境界の検証だけが静かに無効になる。
 version: "2"
 
 run:
