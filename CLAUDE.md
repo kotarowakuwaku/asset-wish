@@ -40,9 +40,11 @@
 | サーバーのテスト | Vitest（`@cloudflare/vitest-pool-workers`。workerd の中で走る） |
 | マイグレーション | `wrangler d1 migrations` |
 | 配信 | front と API を同一 Worker から配信（同一オリジン。CORS は無い） |
-| デプロイ | `npm run deploy`（手動） |
+| デプロイ | `main` へのマージで自動。手元からは `npm run deploy` |
 
 **本番は `https://asset-wish.mochiya.workers.dev` で稼働中。** 認証は固定トークン方式。
+
+**`main` に入ると自動でデプロイされる**（`.github/workflows/deploy.yml`）。D1 のマイグレーションもデプロイ前に自動で当たる。手元から出したいときは `npm run deploy`。
 
 ## リポジトリ構成
 
