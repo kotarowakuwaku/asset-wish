@@ -33,6 +33,16 @@ export function subMoney(a: Money, b: Money): Money {
   return (a - b) as Money
 }
 
+/**
+ * 符号を反転する。口座から出ていく額を表すのに使う。
+ *
+ * `-m` ではなく `0 - m` にしているのは、0 を反転したときに -0 を作らないため。
+ * -0 は表示や比較のたびに 0 と紛れる（Object.is では別物になる）。
+ */
+export function negateMoney(m: Money): Money {
+  return (0 - m) as Money
+}
+
 export function isPositiveMoney(m: Money): boolean {
   return m > 0
 }

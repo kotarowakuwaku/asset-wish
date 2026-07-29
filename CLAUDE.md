@@ -197,8 +197,8 @@ npx playwright test --ui       # E2E を目視で追う
 | 1 | `wrangler.jsonc`・`migrations/0001_init.sql` | 完了 |
 | 2 | `worker/src/domain` の移植とテスト | 完了 |
 | 3 | `repository`（D1 アクセス） | 完了 |
-| 4 | `usecase` | ← 次はここ |
-| 5 | `handler`（19経路） | |
+| 4 | `usecase` | 完了 |
+| 5 | `handler`（19経路） | ← 次はここ |
 | 6 | front の接続と静的アセット配信 | |
 | 7 | `wrangler deploy`・CI の更新 | |
 | 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | |

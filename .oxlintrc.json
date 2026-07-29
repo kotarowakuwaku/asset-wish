@@ -33,6 +33,25 @@
           }
         ]
       }
+    },
+    {
+      // 不変条件9：依存の向きは handler → usecase → domain。
+      // usecase は永続化の手段を知らない。リポジトリのインターフェースを
+      // 自分で持ち、実装は adapter が与える。
+      "files": ["worker/src/usecase/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/adapter/**", "**/infra/**", "hono", "hono/*"],
+                "message": "usecase は adapter を知らない（不変条件9）。必要な操作はポートとして port.ts に定義する。"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

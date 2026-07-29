@@ -2,7 +2,7 @@
 
 Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画。
 
-**状態：段階1（足場・スキーマ）・段階2（domain）・段階3（repository）が完了。次は段階4（usecase）。**
+**状態：段階1〜4（足場・スキーマ・domain・repository・usecase）が完了。次は段階5（handler）。**
 決定事項は10章、実装の順序は11章にある。
 
 ---

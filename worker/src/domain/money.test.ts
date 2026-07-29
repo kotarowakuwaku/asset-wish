@@ -5,6 +5,7 @@ import {
   isPositiveMoney,
   isZeroMoney,
   money,
+  negateMoney,
   subMoney,
   ZERO_MONEY,
 } from './money'
@@ -32,6 +33,12 @@ describe('加減算と符号の判定', () => {
   it('加算・減算', () => {
     expect(addMoney(money(500_000), money(300_000))).toBe(800_000)
     expect(subMoney(money(12_000), money(5_000))).toBe(7_000)
+  })
+
+  it('符号の反転', () => {
+    expect(negateMoney(money(12_000))).toBe(-12_000)
+    expect(negateMoney(money(-12_000))).toBe(12_000)
+    expect(negateMoney(ZERO_MONEY)).toBe(0)
   })
 
   it('符号の判定', () => {
