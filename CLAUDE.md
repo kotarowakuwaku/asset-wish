@@ -194,6 +194,8 @@ npx playwright test --ui       # E2E を目視で追う
 
 背景は「クレジットカードを登録しない」という制約。GCP は無料枠を使うだけでも請求先アカウントが必須のため、Cloud Run が選択肢から落ちた。
 
+**本番は `https://asset-wish.mochiya.workers.dev` で稼働中。** デプロイは手元から `npm run deploy`。
+
 | 段階 | 内容 | 状態 |
 | --- | --- | --- |
 | 1 | `wrangler.jsonc`・`migrations/0001_init.sql` | 完了 |
@@ -202,8 +204,8 @@ npx playwright test --ui       # E2E を目視で追う
 | 4 | `usecase` | 完了 |
 | 5 | `handler`（19経路） | 完了 |
 | 6 | front の接続と静的アセット配信 | 完了 |
-| 7 | `wrangler deploy`・CI の更新 | ← 次はここ。Cloudflare のアカウントが要る |
-| 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | |
+| 7 | `wrangler deploy`・CI の更新 | デプロイ完了。CI からの自動デプロイは未設定 |
+| 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | ← 次はここ |
 
 **`server/`（Go）は段階8まで残す。** 移植元として参照するためであり、まだ動く。上の「技術スタック」表と下の「開発の進め方」は Go 版のもので、移行が終わるまでは両方が有効。
 

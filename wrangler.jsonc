@@ -20,9 +20,12 @@
     {
       "binding": "DB",
       "database_name": "asset-wish",
-      // 実際の D1 を作るまでの仮置き。`wrangler d1 create asset-wish` の
-      // 出力で置き換える。ローカル（--local / vitest）はこの値を見ない。
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // `wrangler d1 create asset-wish` が採番した識別子。
+      //
+      // これは秘密情報ではない。単体では何も開けず、アクセスにはアカウントの
+      // 認証が別途要る（不変条件17に触れない）。ローカル（--local / vitest）は
+      // この値を見ない。
+      "database_id": "49a637fe-0a90-4dcd-ba29-a068eee1304d",
       "migrations_dir": "migrations"
     }
   ],

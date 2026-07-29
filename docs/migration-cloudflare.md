@@ -2,7 +2,14 @@
 
 Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画。
 
-**状態：段階1〜6が完了。`wrangler dev` で front ごとローカルで動く。残りは段階7（デプロイ）と段階8（後片付け）で、ここから先は Cloudflare のアカウントが要る。**
+**状態：段階7まで完了。本番稼働中。** 残りは段階8（`server/` の削除とドキュメント整理）だけ。
+
+| | |
+| --- | --- |
+| URL | `https://asset-wish.mochiya.workers.dev` |
+| D1 | `asset-wish`（APAC）。`database_id` は `wrangler.jsonc` にある |
+| 認証 | `AUTH_TOKEN` を `wrangler secret put` で登録済み |
+| デプロイ | 手動（`npm run deploy`）。CI からの自動デプロイは未設定 |
 決定事項は10章、実装の順序は11章にある。
 
 ---
