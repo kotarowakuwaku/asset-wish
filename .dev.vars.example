@@ -1,0 +1,8 @@
+# ローカル開発用の secret。`.dev.vars` にコピーして値を入れる。
+#
+# .dev.vars は .gitignore に入っている。**このリポジトリは public。**
+# 実際のトークンをここに書かない（不変条件17）。
+#
+# 32文字以上が必要。生成例:
+#   openssl rand -base64 48
+AUTH_TOKEN=

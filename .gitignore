@@ -50,3 +50,5 @@ Thumbs.db
 # コミットしない（古いまま残ると、型は通るのに実行時に壊れる）
 /worker-configuration.d.ts
 .wrangler/
+# ローカルの secret。実トークンが入る
+.dev.vars

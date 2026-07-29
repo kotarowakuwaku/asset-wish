@@ -3,9 +3,75 @@
 // /api/* だけがここに来る。それ以外のパスは front/dist の静的アセットが
 // 手前で処理する（wrangler.jsonc の assets.run_worker_first を参照）。
 //
-// 段階5でここに Hono のルート（19経路）を載せる。
+// 依存の組み立ては手書きで行う。DI コンテナは使わない。依存関係を追うのに
+// 別の仕組みを覚える必要がなく、結線が1箇所に見えるほうが学習目的に合う。
+
+import { D1AccountRepository } from './adapter/repository/account'
+import { D1LendingRepository } from './adapter/repository/lending'
+import { D1MonthlyBalanceRepository } from './adapter/repository/monthlyBalance'
+import { D1TransactionRepository } from './adapter/repository/transaction'
+import { D1WishRepository } from './adapter/repository/wish'
+import { D1AtomicWriter } from './adapter/repository/writer'
+import { createApp } from './adapter/handler/app'
+import { toErrorResponse } from './adapter/handler/errors'
+import type { Deps } from './adapter/handler/services'
+import { loadConfig } from './infra/config'
+import { AccountUsecase } from './usecase/account'
+import { DashboardUsecase } from './usecase/dashboard'
+import { LendingUsecase } from './usecase/lending'
+import { MonthlyBalanceUsecase } from './usecase/monthlyBalance'
+import { newUUID, systemClock } from './usecase/port'
+import { TransactionUsecase } from './usecase/transaction'
+import { WishUsecase } from './usecase/wish'
+
+/**
+ * 結線。テストからも呼べるように公開している（統合テストで実 D1 に当てる）。
+ */
+export function buildDeps(env: Env): Deps {
+  const { authToken } = loadConfig(env)
+
+  // ここから下が結線。依存の向きは handler → usecase → domain。
+  const accountRepo = new D1AccountRepository(env.DB)
+  const lendingRepo = new D1LendingRepository(env.DB)
+  const wishRepo = new D1WishRepository(env.DB)
+  const balanceRepo = new D1MonthlyBalanceRepository(env.DB)
+  const transactionRepo = new D1TransactionRepository(env.DB)
+  const writer = new D1AtomicWriter(env.DB)
+
+  const now = systemClock
+  const newID = newUUID
+
+  return {
+    accounts: new AccountUsecase(accountRepo, now, newID),
+    lendings: new LendingUsecase(writer, lendingRepo, accountRepo, now, newID),
+    wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
+    balances: new MonthlyBalanceUsecase(balanceRepo, newID),
+    transactions: new TransactionUsecase(transactionRepo),
+    dashboard: new DashboardUsecase(accountRepo, lendingRepo, wishRepo, balanceRepo),
+    now,
+    authToken,
+  }
+}
+
+// isolate が使い回される間は組み立て直さない。env の実体が変わったときだけ作る。
+let cached: { env: Env; app: ReturnType<typeof createApp> } | null = null
+
+function getApp(env: Env): ReturnType<typeof createApp> {
+  if (cached === null || cached.env !== env) {
+    cached = { env, app: createApp(buildDeps(env)) }
+  }
+  return cached.app
+}
+
 export default {
-  fetch(): Response {
-    return Response.json({ error: { code: 'NOT_FOUND', message: 'not found' } }, { status: 404 })
+  async fetch(request, env, ctx): Promise<Response> {
+    try {
+      return await getApp(env).fetch(request, env, ctx)
+    } catch (err) {
+      // 設定不備はここに来る。起動の瞬間が無いランタイムなので、
+      // 「起動させない」の代わりに「必ず 500 で落とす」で安全側に倒す。
+      const { status, body } = toErrorResponse(err)
+      return Response.json(body, { status })
+    }
   },
 } satisfies ExportedHandler<Env>

@@ -136,6 +136,7 @@ npm run check                  # typecheck + oxlint + vitest。ループの停�
 npm run test                   # vitest のみ。workerd の中で走る
 npm run types                  # worker-configuration.d.ts を生成（typecheck の前に自動で走る）
 npm run migrate:local          # ローカル D1 にマイグレーションを当てる
+npm run dev                    # wrangler dev。AUTH_TOKEN は .dev.vars に置く
 npx wrangler d1 execute asset-wish --local --command "SELECT ..."
 
 # front
@@ -198,8 +199,8 @@ npx playwright test --ui       # E2E を目視で追う
 | 2 | `worker/src/domain` の移植とテスト | 完了 |
 | 3 | `repository`（D1 アクセス） | 完了 |
 | 4 | `usecase` | 完了 |
-| 5 | `handler`（19経路） | ← 次はここ |
-| 6 | front の接続と静的アセット配信 | |
+| 5 | `handler`（19経路） | 完了 |
+| 6 | front の接続と静的アセット配信 | ← 次はここ |
 | 7 | `wrangler deploy`・CI の更新 | |
 | 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | |
 

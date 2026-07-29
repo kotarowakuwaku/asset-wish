@@ -6,6 +6,14 @@
   },
   "overrides": [
     {
+      // 500 の原因はログにしか残らない。クライアントには出さないため、
+      // ここだけ console を許す。
+      "files": ["worker/src/adapter/handler/errors.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
       // 不変条件5：domain は外部依存ゼロ。
       // Go では .golangci.yml の depguard が担っていた検査をここに移した
       // （docs/migration-cloudflare.md 10章 #5）。
