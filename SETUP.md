@@ -436,6 +436,70 @@ goose -dir db/migrations postgres "$DATABASE_URL" up
 
 ---
 
+## 14. Cloudflare Workers として動かす（移行中。段階6以降）
+
+**Cloudflare のアカウントもログインも要らない。** `wrangler` は CLI であって、`--remote` や `deploy` を付けない限りネットワークに出ない。D1 も `.wrangler/state/` の SQLite ファイルとして手元に作られる。
+
+上の 11〜13 章（Docker・Postgres・Go サーバー・`front/npm run dev`）は Go 版の手順で、こちらとは独立している。移行が終わるまでは両方が動く。
+
+### 14-1. 依存を入れてスキーマを流す
+
+```bash
+# リポジトリのルートで
+npm install
+npm run migrate:local          # .wrangler/state/ 配下に SQLite ができる
+```
+
+### 14-2. `.dev.vars` に認証トークンを置く
+
+```bash
+cp .dev.vars.example .dev.vars
+# AUTH_TOKEN= の右に32文字以上の値を書く。生成例:
+openssl rand -base64 48
+```
+
+`.dev.vars` は `.gitignore` に入っている。**このリポジトリは public。実際のトークンをコミットしない（不変条件17）。**
+
+32文字未満だと起動を拒否する（`worker/src/infra/config.ts`）。公開エンドポイントに短いトークンを置くと総当たりが現実的になるため。
+
+### 14-3. front をビルドして起動する
+
+```bash
+cd front && npm run build && cd ..   # front/dist を作る
+npm run dev                          # http://localhost:8787
+```
+
+`front/dist` は `wrangler.jsonc` の `assets.directory` に指定してある。**front と API が同じオリジンから出る**ため、CORS の設定は存在しない。
+
+front を書き換えたら `npm run build` を打ち直す。`wrangler dev` は `worker/` の変更は拾うが、`front/dist` はビルド成果物なので自動では作り直されない。
+
+### 14-4. 動いているかの確認
+
+```bash
+TOKEN=$(grep AUTH_TOKEN .dev.vars | cut -d= -f2)
+
+# SPA が返る
+curl -s -o /dev/null -w "%{http_code} %{content_type}\n" http://localhost:8787/
+
+# 認証なしの API は 401
+curl -s http://localhost:8787/api/accounts
+
+# 認証ありなら通る
+curl -s http://localhost:8787/api/dashboard -H "Authorization: Bearer $TOKEN"
+```
+
+`/api/*` が Worker に届くのは `wrangler.jsonc` の `assets.run_worker_first` があるため。これが無いと `not_found_handling` が働いて、API 呼び出しに `index.html` が返る。
+
+### 14-5. 検証は `npm run check` 一本
+
+```bash
+npm run check                  # typecheck + oxlint + vitest
+```
+
+テストは workerd の中で走る。リポジトリ層と統合テストは miniflare のローカル D1 に対して実行され、`migrations/` の DDL をそのまま流す。**別途 DB を起動する必要は無い。**
+
+---
+
 ## セットアップ後：どこから書くか
 
 `server/internal/domain/` から。**DB も GCP も Terraform も不要**で、今すぐ書ける。

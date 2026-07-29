@@ -2,7 +2,7 @@
 
 Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画。
 
-**状態：段階1〜5（足場・スキーマ・domain・repository・usecase・handler）が完了。次は段階6（front の接続）。**
+**状態：段階1〜6が完了。`wrangler dev` で front ごとローカルで動く。残りは段階7（デプロイ）と段階8（後片付け）で、ここから先は Cloudflare のアカウントが要る。**
 決定事項は10章、実装の順序は11章にある。
 
 ---

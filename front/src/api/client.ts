@@ -45,15 +45,16 @@ export class ApiError extends Error {
 }
 
 /**
- * baseUrl は API の基底 URL。
+ * baseUrl は API の基底 URL。**空文字＝同一オリジン。**
  *
- * ビルド時の環境変数から取る。**トークンはここに含めない。**
- * ビルド成果物に焼き込むと、静的ホスティングに置いた時点で公開される
- * （CLAUDE.md 不変条件17）。
+ * front と API は同じ Worker から配信される（docs/migration-cloudflare.md 9章）。
+ * 相対パスで足りるため、環境変数での切り替えも要らない。
+ *
+ * ここを絶対 URL に戻すと CORS が復活する。**戻さないこと。**
+ * なお、**トークンはここに含めない。** ビルド成果物に焼き込むと、
+ * 配信された時点で公開される（CLAUDE.md 不変条件17）。
  */
-const baseUrl = (
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
-).replace(/\/$/, '')
+const baseUrl = ''
 
 type ErrorBody = { error?: { code?: string; message?: string } }
 
@@ -74,8 +75,9 @@ async function request<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
-    // サーバーが落ちている、CORS で弾かれた、圏外、のいずれか。
-    // 区別する手段がブラウザ側に無いので、まとめて扱う。
+    // サーバーが落ちている、圏外、のいずれか。区別する手段がブラウザ側に
+    // 無いので、まとめて扱う。同一オリジンになったため CORS で弾かれる
+    // ケースは無くなった。
     throw new ApiError(0, 'NETWORK_ERROR', 'サーバーに接続できませんでした')
   }
 

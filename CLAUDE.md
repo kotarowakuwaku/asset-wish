@@ -136,7 +136,8 @@ npm run check                  # typecheck + oxlint + vitest。ループの停�
 npm run test                   # vitest のみ。workerd の中で走る
 npm run types                  # worker-configuration.d.ts を生成（typecheck の前に自動で走る）
 npm run migrate:local          # ローカル D1 にマイグレーションを当てる
-npm run dev                    # wrangler dev。AUTH_TOKEN は .dev.vars に置く
+npm run dev                    # wrangler dev。localhost:8787 で front ごと動く
+                               # 事前に front のビルドと .dev.vars の AUTH_TOKEN が要る
 npx wrangler d1 execute asset-wish --local --command "SELECT ..."
 
 # front
@@ -200,8 +201,8 @@ npx playwright test --ui       # E2E を目視で追う
 | 3 | `repository`（D1 アクセス） | 完了 |
 | 4 | `usecase` | 完了 |
 | 5 | `handler`（19経路） | 完了 |
-| 6 | front の接続と静的アセット配信 | ← 次はここ |
-| 7 | `wrangler deploy`・CI の更新 | |
+| 6 | front の接続と静的アセット配信 | 完了 |
+| 7 | `wrangler deploy`・CI の更新 | ← 次はここ。Cloudflare のアカウントが要る |
 | 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | |
 
 **`server/`（Go）は段階8まで残す。** 移植元として参照するためであり、まだ動く。上の「技術スタック」表と下の「開発の進め方」は Go 版のもので、移行が終わるまでは両方が有効。
