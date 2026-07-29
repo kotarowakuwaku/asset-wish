@@ -2,7 +2,7 @@
 
 GitHub リポジトリの作成から、最初のコミットまで。
 
-**前提：このプロジェクトは個人アカウントで作る。** 会社の GitHub アカウント・Google アカウントは使わない。規約上の問題に加えて、退職時にリポジトリも GCP プロジェクトも失う。
+**前提：このプロジェクトは個人アカウントで作る。** 会社の GitHub アカウント・Google アカウントは使わない。規約上の問題に加えて、退職時にリポジトリも Cloudflare のアカウントも失う。
 
 ---
 
@@ -137,7 +137,7 @@ git config user.email
 ```bash
 mkdir -p .claude/skills/architecture-review
 mkdir -p .github/workflows
-mkdir -p docs server front infra
+mkdir -p docs worker/src front migrations
 ```
 
 渡したファイルを以下に置く。
@@ -153,8 +153,8 @@ asset-wish/
 │   │   └── architecture-review/
 │   │       └── SKILL.md
 │   ├── hooks/
-│   │   ├── check-go-fast.sh                     ← 実行権限を付けること
-│   │   └── check-go-full.sh
+│   │   ├── check-fast.sh                        ← 実行権限を付けること
+│   │   └── check-full.sh
 │   └── agents/
 │       └── fixer.md
 ├── .github/
@@ -163,61 +163,14 @@ asset-wish/
 ├── docs/
 │   ├── requirements.md                          ← 要件定義書 v1.0
 │   └── design.md                                ← 設計書 v0.1
-├── server/
-│   └── .golangci.yml
-├── front/
-└── infra/
+├── .oxlintrc.json                               ← レイヤ境界の強制を含む
+├── wrangler.jsonc
+├── migrations/
+├── worker/
+└── front/
 ```
 
-## 5. Go モジュールを初期化する
-
-```bash
-cd server
-go mod init github.com/<自分のアカウント>/asset-wish/server
-```
-
-## 6. `.golangci.yml` の `MODULE_PATH` を置換する
-
-**この手順を飛ばすと depguard が一切機能しない。** レイヤ境界の強制がこのプロジェクトの要なので、必ず行う。
-
-```bash
-# server ディレクトリ内で
-MODULE=$(head -1 go.mod | cut -d' ' -f2)
-
-# macOS
-sed -i '' "s|MODULE_PATH|$MODULE|g" .golangci.yml
-# Linux
-# sed -i "s|MODULE_PATH|$MODULE|g" .golangci.yml
-
-grep MODULE_PATH .golangci.yml   # 何も出なければ置換完了
-```
-
-## 7. depguard が効いているか確かめる
-
-CI に頼る前に、ローカルでわざと落としてみる。
-
-```bash
-mkdir -p internal/domain
-cat > internal/domain/tmp_check.go <<'EOF'
-package domain
-
-import _ "database/sql"
-EOF
-
-golangci-lint run
-# → "domain は永続化を知らない" というエラーが出れば成功
-
-rm internal/domain/tmp_check.go
-```
-
-エラーが出ない場合は、6 の置換が効いていないか、`golangci-lint` が未インストール。
-
-```bash
-# 未インストールの場合
-brew install golangci-lint
-```
-
-## 8. front（構築済み。クローン後に必要な作業のみ）
+## 5. front（構築済み。クローン後に必要な作業のみ）
 
 Vite + React + TypeScript の SPA として構築済み。リポジトリをクローンした環境では以下を行う。
 
@@ -260,7 +213,7 @@ E2E は dev サーバーではなく `npm run build && npm run preview` の成�
 
 スマートフォンのホーム画面に置きたくなったら、`vite-plugin-pwa` で manifest と Service Worker を後付けする。現時点では不要。
 
-## 9. 最初のコミットと push
+## 6. 最初のコミットと push
 
 ```bash
 cd ~/personal/asset-wish
@@ -272,7 +225,7 @@ git push -u origin main
 
 **`git status` の確認は省略しない。** 一度履歴に入った秘密情報の除去は非常に面倒になる。
 
-## 10. ブランチ保護を設定する
+## 7. ブランチ保護を設定する
 
 GitHub のリポジトリ設定 → Rules → Rulesets（または Settings → Branches）で、`main` に対して以下を設定する。
 
@@ -292,155 +245,9 @@ GitHub のリポジトリ設定 → Rules → Rulesets（または Settings → 
 
 ---
 
-## 11. ローカル DB を用意する（段階2以降）
+## 8. 手元で動かす
 
-段階1（`domain`）までは DB 不要だった。段階2からは要る。
-
-ツールの版は `mise.toml` に固定してある。クローン直後は次で揃う。
-
-```bash
-mise install     # sqlc 1.27.0 / goose 3.27.3
-```
-
-### 11-1. Docker を入れる
-
-WSL2 の Ubuntu に docker engine を入れる。Docker Desktop は要らない。
-
-```bash
-sudo apt update
-sudo apt install -y docker.io docker-compose-v2
-sudo usermod -aG docker "$USER"
-# グループ変更を反映するため WSL を再起動する（PowerShell から wsl --shutdown）
-```
-
-**イメージは `postgres:16` を使う。** Ubuntu 26.04 の apt が入れる PostgreSQL は 18 で、CI の `services.postgres`（16）とずれる。手元と CI でバージョンが違うと、`手元では通るのに CI で落ちる` が起きたときに原因の切り分けができなくなる。Docker を挟むのはこれを避けるため。
-
-### 11-2. 起動してマイグレーションを流す
-
-```bash
-cd server
-docker compose up -d
-
-export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
-goose -dir db/migrations postgres "$DATABASE_URL" up
-goose -dir db/migrations postgres "$DATABASE_URL" status
-```
-
-### 11-3. スキーマが本当に流れるかを検証する
-
-`server/db/embed_test.go` が、まっさらな DB にマイグレーションを適用して戻すところまでを確かめる。
-
-```bash
-go test ./db/...
-```
-
-**`DATABASE_URL` が未設定なら SKIP する。** 段階1までと同じく「DB 無しで `go test ./...` が通る」状態を壊さないため。CI では `services.postgres` と `DATABASE_URL` が用意されているので、そこでは実際に走る。
-
-このテストは `DROP SCHEMA public CASCADE` を実行する。**接続先が localhost でなければ失敗させている。** Neon の本番 URL を export したまま `go test` を打つ事故は、放っておけばいずれ必ず起きるため。
-
-sqlc のパーサを通ることは構文の正しさしか保証しない。CHECK 制約に IMMUTABLE でない関数を書いた、といった意味解析のエラーは実物に流して初めて出る。**ここが段階2の検証ゲートになる。**
-
-資格情報 `test:test` はローカル専用の使い捨て。**本番の接続文字列は環境変数から読む**（`CLAUDE.md` 不変条件17）。`compose.yaml` に書いてよいのは、この値が漏れても何も起きないから。
-
-### 11-4. スキーマを変えたとき
-
-```bash
-goose -dir db/migrations create <名前> sql   # 新しいマイグレーションを作る
-sqlc generate                                # 生成コードを作り直す
-sqlc diff                                    # 差分が無いことを確認（CI と同じ検証）
-```
-
-**生成コード `server/internal/db/` はコミットする。** CI の `sqlc diff` はコミット漏れの検出が目的なので、無視すると意味が消える。
-
-**`docs/design.md` 2.2 の DDL も同時に直すこと。** マイグレーションだけ直すと設計書が嘘になる。
-
-### 11-5. `-race` を手元で走らせる（段階4で必要になる）
-
-CI は `go test -race ./...` を使う。手元で同じものを走らせるには C コンパイラが要る。
-
-```bash
-sudo apt install -y build-essential   # 無いと go test -race が cgo 不足で落ちる
-```
-
-**段階3までは入れなくてよい。** `-race` は複数の goroutine が同じメモリを同期なしで触る箇所を実行時に捕まえるもので、`domain` の純粋関数と逐次実行のマイグレーションテストしか無いうちは検出対象が存在しない。
-
-要るのは**段階4以降**。`net/http` はリクエストごとに goroutine を立てるため、パッケージ変数に状態を持たせた、リポジトリ実装が map を共有した、といったバグがそこで初めて成立する。この種のバグはテストがたまたま緑になるので `-race` 以外では見つからない。**入れないまま段階4に進むと、CI だけが赤くなってログから推測する羽目になる。**
-
-入れると `CGO_ENABLED` の既定が 0 から 1 に変わり、手元の `go build` が動的リンクのバイナリを吐くようになる。デプロイ用のビルドは段階5でコンテナの中でやるため実害は無いが、変わること自体は知っておく。
-
-## 12. API サーバーを手元で動かす（段階4以降）
-
-必要な環境変数は4つ。**足りなければ起動しない。** 起動してから「認証が素通りだった」と気付くより安全側に倒す。
-
-```bash
-cd server
-export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
-export AUTH_TOKEN="$(openssl rand -hex 16)"   # 32文字以上。短いと起動を拒否する
-export ALLOWED_ORIGINS='http://localhost:5173'  # front の開発サーバー。ワイルドカード不可
-export PORT=8080                                # 省略時 8080
-
-go run ./cmd/api
-```
-
-呼ぶときは Bearer トークンを付ける。
-
-```bash
-curl -H "Authorization: Bearer $AUTH_TOKEN" http://localhost:8080/api/dashboard
-```
-
-**`AUTH_TOKEN` をシェル履歴やファイルに残さない。** このリポジトリは public（`CLAUDE.md` 不変条件17）。
-
-## 13. front を動かす（段階6以降）
-
-API の場所はビルド時の環境変数で決める。**トークンはここに入れない**（成果物ごと公開される）。
-
-```bash
-cd front
-echo 'VITE_API_BASE_URL=http://localhost:8080' > .env.local   # .gitignore 済み
-npm run dev
-```
-
-初回はトークンの入力を求められる。サーバーの `AUTH_TOKEN` と同じ値を入れる。この端末の `localStorage` にのみ保存される。
-
-サーバー側の `ALLOWED_ORIGINS` に front のオリジンを入れておくこと。入っていないとブラウザが CORS で弾き、画面には「サーバーに接続できませんでした」とだけ出る。
-
-```bash
-export ALLOWED_ORIGINS='http://localhost:5173'   # npm run dev のオリジン
-```
-
-### 実物のサーバーとつないで確認する
-
-`npm run check` の E2E は API をブラウザ側で差し替えており、**サーバーも DB も起動しない**。CORS・認証・JSON の噛み合わせはそこでは分からないので、疑わしいときは実物で通す。
-
-```bash
-# 1) DB とサーバー
-cd server && docker compose up -d
-export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
-goose -dir db/migrations postgres "$DATABASE_URL" up
-AUTH_TOKEN=$(openssl rand -hex 16) ALLOWED_ORIGINS='http://localhost:4173' PORT=8081 go run ./cmd/api
-
-# 2) front（別のシェルで）
-cd front && VITE_API_BASE_URL=http://localhost:8081 npm run build && npm run preview
-```
-
-### テストを回したあとに 500 が出たら
-
-`go test ./...` のあとで API が `INTERNAL_ERROR` を返すことがある。repository のテストが、**CHECK 制約を外して壊れた行を意図的に作る**ため（復元時の検証が効くことの確認）。その行がローカル DB に残っていると、一覧の取得が「不正な値をドメイン層へ渡さない」判断で止まる。
-
-アプリとしては正しい振る舞いなので、DB を作り直せばよい。
-
-```bash
-docker compose down -v && docker compose up -d
-goose -dir db/migrations postgres "$DATABASE_URL" up
-```
-
----
-
-## 14. Cloudflare Workers として動かす（移行中。段階6以降）
-
-**Cloudflare のアカウントもログインも要らない。** `wrangler` は CLI であって、`--remote` や `deploy` を付けない限りネットワークに出ない。D1 も `.wrangler/state/` の SQLite ファイルとして手元に作られる。
-
-上の 11〜13 章（Docker・Postgres・Go サーバー・`front/npm run dev`）は Go 版の手順で、こちらとは独立している。移行が終わるまでは両方が動く。
+**Cloudflare のアカウントもログインも要らない。** `wrangler` は CLI であって、`--remote` や `deploy` を付けない限りネットワークに出ない。D1 も `.wrangler/state/` の SQLite ファイルとして手元に作られる。DB を別途起動する必要も無い。
 
 ### 14-1. 依存を入れてスキーマを流す
 
@@ -502,7 +309,7 @@ npm run check                  # typecheck + oxlint + vitest
 
 ## セットアップ後：どこから書くか
 
-`server/internal/domain/` から。**DB も GCP も Terraform も不要**で、今すぐ書ける。
+`worker/src/domain/` から。**DB もアカウントも不要**で、今すぐ書ける。
 
 ```bash
 cd server
@@ -513,7 +320,7 @@ go test ./internal/domain/...
 
 テストケースは `docs/design.md` の 6.1 に15件挙げてある。特にケース2・6・7（投資を含めない、二重計上しない）は、このアプリの存在意義そのものを守るテストなので最優先で書く。
 
-**先にインフラを整えようとしないこと。** アプリの中身に到達する前に消耗する。Terraform と GCP は、実運用したくなった時点で着手すればよい。
+**先にインフラを整えようとしないこと。** アプリの中身に到達する前に消耗する。デプロイは、実運用したくなった時点で着手すればよい。
 
 ---
 
@@ -523,12 +330,10 @@ go test ./internal/domain/...
 
 - `dorny/paths-filter` で `server` / `front` / `infra` の変更を判定し、該当するジョブだけ走らせる。E2E はブラウザを起動するぶん時間がかかるため、front を触っていない PR で回さない意味は大きい
 - **`permissions: pull-requests: read` は必須。** 既定の `GITHUB_TOKEN` は `contents:read` のみに絞られており、これが無いと paths-filter が PR の変更ファイル一覧を取れず `Resource not accessible by integration` で初手から落ちる
-- `sqlc diff` は生成コードのコミット漏れを検出する。事故が多いので入れてある
+- `npm run check` は `wrangler types` を先に走らせる。生成された型が古いまま通ることを構造的に防いでいる
 - `infra` ジョブは `terraform validate` までで、`plan` や `apply` は行わない。認証情報を CI に持たせないため
 
-Terraform に着手するまで `infra` ジョブは走らない。
-
-**まだ存在しない設定ファイルを前提にしたステップは、`hashFiles` で条件付きにしてある。** 現時点では `sqlc diff`（`server/sqlc.yaml` 待ち）と front の `check`（`front/playwright.config.ts` 待ち）がこれに当たる。無条件に走らせると CI が常時赤になり、「CI が赤いのはいつものこと」という状態に慣れてしまう。**検証ゲートは、赤が意味を持つ状態に保たなければ機能しない。**
+**検証ゲートは、赤が意味を持つ状態に保たなければ機能しない。** 常時赤い CI は「赤いのはいつものこと」という慣れを生み、ゲートとして働かなくなる。
 
 ### ループを回す前提の構成
 
@@ -537,8 +342,8 @@ Terraform に着手するまで `infra` ジョブは走らない。
 | ファイル | 役割 |
 | --- | --- |
 | `.claude/settings.json` | フックの登録 |
-| `.claude/hooks/check-go-fast.sh` | `Write`/`Edit` の直後に `gofmt` と `go build`。壊れたまま先に進ませない |
-| `.claude/hooks/check-go-full.sh` | 作業を終えようとした瞬間に `go test` / `go vet` / `golangci-lint`。落ちていれば差し戻す |
+| `.claude/hooks/check-fast.sh` | `Write`/`Edit` の直後に型チェックと oxlint。壊れたまま先に進ませない |
+| `.claude/hooks/check-full.sh` | 作業を終えようとした瞬間に `npm run check`（触った側だけ）。落ちていれば差し戻す |
 | `.claude/agents/fixer.md` | 同じエラーで2周足踏みしたときに呼ぶ、別コンテキストの担当 |
 
 `CLAUDE.md` の「ループ協議」が完了の定義（＝チェックが緑であること）を担い、フックがそれを機械的に強制する。**片方だけでは効かない。** 規約だけならエージェントは自己申告で完了を宣言できてしまうし、フックだけでは何を直すべきかの方針が伝わらない。
@@ -549,11 +354,21 @@ Terraform に着手するまで `infra` ジョブは走らない。
 
 スキルは固定ではなく育てるもの。**レビューで指摘されなかった不具合を見つけたら、それをチェック項目として足す**のが一番効く。
 
-### GCP について
+### Cloudflare のアカウントについて
 
-段階5に入る際は、**個人の Google アカウント**でプロジェクトを作る。`gcloud` のプロファイルを分けておくと切り替えが楽になる。
+**アプリを実際に公開するまで不要。** テストも `wrangler dev` もローカルで完結する。
+
+公開する段になったら、**個人のメールアドレス**でアカウントを作る（<https://dash.cloudflare.com/sign-up>）。**カード登録は求められない。**
 
 ```bash
-gcloud config configurations create personal
-gcloud config configurations activate personal
+npx wrangler login              # ブラウザが開いて OAuth
+npx wrangler d1 create asset-wish
+# 出力された database_id を wrangler.jsonc に貼る
+npm run migrate:remote
+npx wrangler secret put AUTH_TOKEN   # 32文字以上。別ターミナルで生成して貼る
+npm run deploy
 ```
+
+**「Workers Paid」への導線を押さないこと。** 既定は Free で、Free は無料枠を超えると課金ではなく停止する。この性質が月額0円を担保している（要件定義書 7.5）。
+
+`workers.dev` のサブドメインはアカウントに一度だけ登録する。**公開 URL の一部として誰にでも見えるため、本名やメールのローカル部を使わない。**

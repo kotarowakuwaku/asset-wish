@@ -19,23 +19,18 @@ concurrency:
 
 jobs:
   # 変更のあったディレクトリだけ後続ジョブを走らせる。
-  # front を触っただけで server のテストが回るのを防ぐ。
+  # front を触っただけで worker のテストが回るのを防ぐ。
   changes:
     runs-on: ubuntu-latest
     outputs:
-      server: ${{ steps.filter.outputs.server }}
       worker: ${{ steps.filter.outputs.worker }}
       front: ${{ steps.filter.outputs.front }}
-      infra: ${{ steps.filter.outputs.infra }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
-            server:
-              - 'server/**'
-              - '.github/workflows/ci.yml'
             worker:
               - 'worker/**'
               - 'migrations/**'
@@ -49,82 +44,6 @@ jobs:
             front:
               - 'front/**'
               - '.github/workflows/ci.yml'
-            infra:
-              - 'infra/**'
-
-  server:
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
-      - name: gofmt
-        run: |
-          diff=$(gofmt -l .)
-          if [ -n "$diff" ]; then
-            echo "gofmt が未適用のファイル:"
-            echo "$diff"
-            exit 1
-          fi
-
-      - name: go vet
-        run: go vet ./...
-
-      # レイヤ境界の検証を含む。domain が外部依存を持った時点でここが落ちる。
-      #
-      # action は v8 系（golangci-lint v2 対応）を使う。v6 は v1.64 を入れてくるが、
-      # v1.64 は go1.24 でビルドされており go.mod の 1.26 を読めずに落ちる。
-      # また .golangci.yml は version: "2" 形式なので v1 では解釈できない。
-      # バージョンはローカルと揃えて固定する。ここがずれると
-      # 「手元では通るのに CI で落ちる」が始まり、ループが信用できなくなる。
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.12.2
-          working-directory: server
-
-      # 生成コードのコミット漏れ検出。事故が多いので必ず入れる。
-      # 段階2で sqlc.yaml を置いた時点で自動的に有効になる。
-      # それまで無条件に走らせると設定ファイルが無くて必ず落ち、
-      # 検証ゲートが常時赤になってループが機能しなくなる。
-      - name: setup sqlc
-        if: hashFiles('server/sqlc.yaml', 'server/sqlc.json') != ''
-        uses: sqlc-dev/setup-sqlc@v4
-        with:
-          sqlc-version: '1.27.0'
-      - name: sqlc diff
-        if: hashFiles('server/sqlc.yaml', 'server/sqlc.json') != ''
-        run: sqlc diff
-
-      - name: test
-        env:
-          DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
-        run: go test -race ./...
 
   # Cloudflare Workers 側。テストは workerd の中で走るため、Node の API に
   # 依存した実装が紛れ込むとここで落ちる。
@@ -189,24 +108,9 @@ jobs:
           path: front/playwright-report/
           retention-days: 7
 
-  infra:
-    needs: changes
-    if: needs.changes.outputs.infra == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false
-      - run: terraform validate
-
   # ブランチ保護から参照する集約ジョブ。**必須チェックはこの ci ひとつだけにする。**
   #
-  # server / front / infra は paths フィルタで skip されうるため、個別に必須
+  # worker / front は paths フィルタで skip されうるため、個別に必須
   # チェックへ登録すると運用が破綻する。かといって changes だけを必須にすると、
   # テストが落ちていてもマージできてしまう（実際そうなっていた）。
   #
@@ -214,7 +118,7 @@ jobs:
   # 新しいジョブを足したら needs にも必ず追加すること。忘れるとそのジョブは
   # 保護の対象外になり、静かに検証の網から漏れる。
   ci:
-    needs: [changes, server, worker, front, infra]
+    needs: [changes, worker, front]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -222,10 +126,8 @@ jobs:
         env:
           RESULTS: >-
             changes=${{ needs.changes.result }}
-            server=${{ needs.server.result }}
             worker=${{ needs.worker.result }}
             front=${{ needs.front.result }}
-            infra=${{ needs.infra.result }}
         run: |
           echo "$RESULTS" | tr ' ' '\n'
           failed=0

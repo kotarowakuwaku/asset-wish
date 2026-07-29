@@ -7,7 +7,7 @@
 #
 # 静かにしておくべき場面では素通しする：
 #   - 直前の差し戻しからの再開（stop_hook_active）→ 無限ループ防止
-#   - server 配下の Go ファイルに未コミットの変更がない（＝会話だけの往復）
+#   - TypeScript に未コミットの変更がない（＝会話だけの往復）
 
 set -uo pipefail
 
@@ -18,37 +18,29 @@ case "$input" in
 esac
 
 root="${CLAUDE_PROJECT_DIR:-.}"
-server="$root/server"
-[ -d "$server" ] || exit 0
+changed=$(git -C "$root" status --porcelain 2>/dev/null)
 
-changed=$(git -C "$root" status --porcelain -- server 2>/dev/null | grep -c '\.go$' || true)
-[ "${changed:-0}" -eq 0 ] && exit 0
+worker_changed=$(echo "$changed" | grep -cE '(worker/|migrations/|wrangler\.jsonc|vitest\.config\.ts|tsconfig\.json|\.oxlintrc\.json)' || true)
+front_changed=$(echo "$changed" | grep -cE 'front/' || true)
 
-cd "$server" || exit 0
+[ "${worker_changed:-0}" -eq 0 ] && [ "${front_changed:-0}" -eq 0 ] && exit 0
 
 failures=""
 
-if ! test_out=$(go test ./... 2>&1); then
-  failures="${failures}
---- go test ---
-$(echo "$test_out" | tail -40)"
-fi
-
-if ! vet_out=$(go vet ./... 2>&1); then
-  failures="${failures}
---- go vet ---
-$(echo "$vet_out" | tail -20)"
-fi
-
-# depguard によるレイヤ境界の検証を含む。不変条件5の機械的な守り手。
-if command -v golangci-lint >/dev/null 2>&1; then
-  if ! lint_out=$(golangci-lint run 2>&1); then
+if [ "${worker_changed:-0}" -gt 0 ]; then
+  if ! out=$(cd "$root" && WRANGLER_SEND_METRICS=false CI=1 npm run check 2>&1); then
     failures="${failures}
---- golangci-lint ---
-$(echo "$lint_out" | tail -40)"
+--- worker: npm run check ---
+$(echo "$out" | tail -40)"
   fi
-else
-  echo "注意: golangci-lint が PATH にないため、レイヤ境界の検証を飛ばした。" >&2
+fi
+
+if [ "${front_changed:-0}" -gt 0 ]; then
+  if ! out=$(cd "$root/front" && npm run check 2>&1); then
+    failures="${failures}
+--- front: npm run check ---
+$(echo "$out" | tail -40)"
+  fi
 fi
 
 if [ -n "$failures" ]; then

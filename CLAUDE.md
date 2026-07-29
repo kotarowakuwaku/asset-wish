@@ -14,6 +14,7 @@
 
 - `docs/requirements.md` — 要件定義書 v1.0（決定事項と、却下した選択肢の理由を含む）
 - `docs/design.md` — 設計書（DDL、ドメイン型、API、パッケージ構成、テスト方針）
+- `docs/migration-cloudflare.md` — Go から TypeScript への移行の記録。**実測で分かった D1 の癖はここに集約されている**
 
 ## 開発上の目的
 
@@ -32,23 +33,37 @@
 | --- | --- |
 | フロント | Vite + React + TypeScript（SPA） |
 | フロントのテスト | Vitest（ロジック）、Playwright（E2E）、oxlint |
-| 配信 | 静的ホスティング（着手時に確定）。ネイティブアプリとしては配布しない |
-| サーバー | Go |
-| DB | PostgreSQL（Neon 無料枠） |
-| クエリ | sqlc（ORM は使わない） |
-| 実行環境 | Cloud Run（us-central1） |
-| IaC | Terraform |
+| サーバー | TypeScript（Cloudflare Workers） |
+| HTTP ルータ | Hono |
+| DB | Cloudflare D1（SQLite） |
+| クエリ | 生の `db.prepare()` + 手書きの行型（ORM もクエリビルダも使わない） |
+| サーバーのテスト | Vitest（`@cloudflare/vitest-pool-workers`。workerd の中で走る） |
+| マイグレーション | `wrangler d1 migrations` |
+| 配信 | front と API を同一 Worker から配信（同一オリジン。CORS は無い） |
+| デプロイ | `npm run deploy`（手動） |
+
+**本番は `https://asset-wish.mochiya.workers.dev` で稼働中。** 認証は固定トークン方式。
 
 ## リポジトリ構成
 
-モノレポ。
+```
+wrangler.jsonc     Worker 定義。D1 binding、静的アセット
+migrations/        D1 のスキーマ。wrangler d1 migrations が管理
+worker/
+  src/
+    domain/        純粋関数と型。外部依存ゼロ（不変条件5）
+    usecase/       手順の組み立てとポート定義
+    adapter/
+      handler/     Hono のルート、DTO、リクエストの解釈
+      repository/  D1 アクセスとドメイン型への詰め替え
+    infra/         設定の読み出しと検証
+    index.ts       エントリポイント（結線）
+  test/            fake・スタブ・テスト用の道具
+front/             Vite + React + TypeScript
+docs/              要件定義書・設計書・移行の記録
+```
 
-```
-front/     Vite + React + TypeScript
-server/    Go（go.mod はこの階層）
-infra/     Terraform
-docs/      要件定義書・設計書
-```
+`package.json` はルートと `front/` の2つ。ルートが Worker 側で、front は独立している。
 
 ## 命名規約
 
@@ -71,14 +86,16 @@ docs/      要件定義書・設計書
 ブランチと同じプレフィクスを使い、`prefix: 要約` の形にする。日本語でよい。詳細が必要な場合は本文で補足する。
 
 例：
-- `feat: domain 層に Money/YearMonth と実質資産計算を追加`
-- `docs: MonthsToReach の切り上げ除算を明記`
+- `feat: domain に Money/YearMonth と実質資産計算を追加`
+- `docs: monthsToReach の切り上げを明記`
 
 ---
 
 ## 絶対に守る不変条件
 
 **以下に反する実装・提案をしてはならない。** レビュー時もここを最優先で確認する。
+
+**番号は変えないこと。** コード中のコメントが番号で参照している。
 
 ### ドメインルール
 
@@ -89,16 +106,16 @@ docs/      要件定義書・設計書
 
 ### アーキテクチャ
 
-5. **`internal/domain` は外部依存ゼロ。** `database/sql`、`net/http`、HTTP フレームワーク、sqlc 生成コード、`internal/adapter`、`internal/infra` を import しない。これは `.golangci.yml` の depguard で機械的に強制されている。ルールに引っかかったら、ルールを緩めるのではなく設計を直す。
-6. **状態遷移の可否判定は `domain` のエンティティメソッドに置く。** `usecase` や `handler` に `if status == ...` を書かない。usecase は「どの遷移を起こしたいか」だけを知る。
-7. **sqlc が生成した構造体を `domain` に持ち込まない。** 相互変換は `adapter/repository` の責務。冗長でも境界を維持する。
-8. **計算ロジックを SQL に書かない。** 実質資産・不足額・到達見込みは Go の純粋関数で計算する。集計クエリで済ませない（テストに DB が必要になるため）。データ規模は年間数百件なので全件取得で問題ない。
-9. **リポジトリのインターフェースは `usecase` パッケージに定義する。** 実装は `adapter/repository`。依存の向きは `handler → usecase → domain`。
-10. **トランザクション境界は `usecase` 層で張る。** handler や repository に散らさない。
+5. **`worker/src/domain` は外部依存ゼロ。** `hono`、`cloudflare:*`、`node:*`、`adapter`、`usecase`、`infra` を import しない。`.oxlintrc.json` の `no-restricted-imports` で機械的に強制されている。ルールに引っかかったら、ルールを緩めるのではなく設計を直す。
+6. **状態遷移の可否判定は `domain` のエンティティメソッドに置く。** `usecase` や `handler` に `if status === ...` を書かない。usecase は「どの遷移を起こしたいか」だけを知る。
+7. **D1 が返す行をそのまま `domain` に持ち込まない。** 行の型（`AccountRow` など）とドメインエンティティの相互変換は `adapter/repository` の責務。冗長でも境界を維持する。
+8. **計算ロジックを SQL に書かない。** 実質資産・不足額・到達見込みは TypeScript の純粋関数で計算する。集計クエリで済ませない（テストに DB が必要になるため）。データ規模は年間数百件なので全件取得で問題ない。
+9. **リポジトリのインターフェースは `usecase` に定義する。** 実装は `adapter/repository`。依存の向きは `handler → usecase → domain`。これも oxlint で強制されている。
+10. **書き込みの原子性は `usecase` が決める。** 複数行にまたがる書き込みは `WriteOperation` の配列として usecase が組み立て、`AtomicWriter` が1回の `db.batch()` に流す。handler や repository が個別に書き込みの順序を決めない。
 
 ### 実装規約
 
-11. **金額は `domain.Money` 型で扱う。** `int64` を裸で持ち回らない。DB とのやり取りの境界でのみ変換する。
+11. **金額は `Money` 型で扱う。** 裸の `number` を持ち回らない。DB・JSON との境界でのみ `money()` を通す。
 12. **導出できる値をカラムに持たない。** 例：立替の回収状態は `amount` と `collected_amount` から判定する。`status` カラムを追加しない。
 13. **ドメインエラーは HTTP 422 に対応させる。** 形式エラー（400）と業務ルール違反（422）を区別する。
 14. **設計書 `docs/design.md` の用語をそのままコードの名前に使う。** 実質資産＝`NetAsset`、月間余剰＝`Surplus`、不足額＝`Shortfall`、未回収＝`Outstanding`。勝手に言い換えない。
@@ -106,50 +123,36 @@ docs/      要件定義書・設計書
 ### 運用
 
 15. **月額0円を厳守する。** 有料プラン・有料サービスを前提とした提案をしない。無料枠を超える構成を導入しない。
-16. **Cloud Run は `max_instance_count` を必ず明示する。** 既定値は100であり、絞らないと課金が青天井になる。
-17. **秘密情報をリポジトリに入れない。** 接続文字列・トークンは環境変数から読む。`internal/infra/config.go` に集約する。**このリポジトリは public。** 1度 push したものは bot に数秒で拾われ、履歴から消しても手遅れになる。実データ（金額・口座名・人名）もコードやドキュメントに書かない。テストで使う値はすべて架空のものにする。
+16. **Cloudflare の Free プランから出ない。** Workers Paid に切り替えない。無料枠を持たない機能を導入しない。**Free プランは超過すると課金ではなく停止する**（確認済み）。この性質に依存して月額0円を担保している。
+17. **秘密情報をリポジトリに入れない。** `AUTH_TOKEN` は `wrangler secret put` で登録し、手元は `.dev.vars`（gitignore 済み）に置く。読み出しは `worker/src/infra/config.ts` に集約する。**このリポジトリは public。** 1度 push したものは bot に数秒で拾われ、履歴から消しても手遅れになる。実データ（金額・口座名・人名）もコードやドキュメントに書かない。テストで使う値はすべて架空のものにする。
 
 ---
 
 ## コマンド
 
 ```bash
-# server
-cd server
-go test ./...                  # テスト
-go test ./internal/domain/...  # ドメイン層のみ（DB不要・高速）
-gofmt -l .                     # フォーマット差分の検出
-go vet ./...
-golangci-lint run              # depguard によるレイヤ境界検証を含む
-sqlc generate                  # クエリからコード生成
-sqlc diff                      # 生成コードが最新かの確認
-
-# ローカル DB（server ディレクトリで）
-docker compose up -d           # postgres:16。CI の services と同じ版
-export DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable'
-goose -dir db/migrations postgres "$DATABASE_URL" up      # マイグレーション適用
-goose -dir db/migrations postgres "$DATABASE_URL" status  # 適用状況
-goose -dir db/migrations postgres "$DATABASE_URL" down    # 1つ戻す
-
-# worker（Cloudflare 移行中。リポジトリのルートで実行する）
+# worker（リポジトリのルートで実行する）
 npm run check                  # typecheck + oxlint + vitest。ループの停止条件
 npm run test                   # vitest のみ。workerd の中で走る
 npm run types                  # worker-configuration.d.ts を生成（typecheck の前に自動で走る）
 npm run migrate:local          # ローカル D1 にマイグレーションを当てる
+npm run migrate:remote         # 本番 D1 に当てる
 npm run dev                    # wrangler dev。localhost:8787 で front ごと動く
                                # 事前に front のビルドと .dev.vars の AUTH_TOKEN が要る
+npm run deploy                 # 本番へ配置
 npx wrangler d1 execute asset-wish --local --command "SELECT ..."
 
 # front
 cd front
 npm run check                  # typecheck + oxlint + vitest + playwright。ループの停止条件
-npm run dev                    # 開発サーバー
+npm run dev                    # 開発サーバー（API は繋がらない。通しで見るならルートの npm run dev）
+npm run build                  # front/dist を作る。Worker が配信するのはこれ
 npx playwright test --ui       # E2E を目視で追う
 ```
 
-`npm run check` が front の検証の入口。個別に走らせるより、まずこれを通す。
+`npm run check` が検証の入口。個別に走らせるより、まずこれを通す。
 
-ツールの版は `mise.toml` で固定してある（`sqlc` / `goose`）。**`sqlc` の版は `.github/workflows/ci.yml` の `setup-sqlc` と必ず揃えること。** ずれると `sqlc diff` が生成コードの差分ではなく版差を検出して落ちる。
+**front を書き換えたら `cd front && npm run build` を打ち直す。** `wrangler dev` は `worker/` の変更は拾うが、`front/dist` はビルド成果物なので自動では作り直されない。
 
 ## ループ協議 — 「完了」の定義
 
@@ -160,12 +163,9 @@ npx playwright test --ui       # E2E を目視で追う
 
    | 触った場所 | 走らせるもの |
    | --- | --- |
-   | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
-   | `server/db/`（スキーマ・クエリ） | 上記に加えて `sqlc generate` → `sqlc diff`、および `DATABASE_URL` を設定した状態での `go test ./db/...` |
    | `worker/` | ルートで `npm run check`（typecheck + oxlint + vitest） |
    | `migrations/`（D1 スキーマ） | 上記に加えて `npm run migrate:local` が通ること |
-   | `front/` | `npm run check`（typecheck + oxlint + vitest + playwright） |
-   | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
+   | `front/` | `cd front && npm run check`（typecheck + oxlint + vitest + playwright） |
 
 3. 落ちたら、出力を最後まで読み、**原因を1文で言語化してから**直して 2 に戻る
 4. 周回は最大5回
@@ -182,73 +182,26 @@ npx playwright test --ui       # E2E を目視で追う
 
 - チェックの出力を示さずに「完了」と報告する
 - テストの削除・スキップ・アサーションの緩和で緑にする
-- `.golangci.yml` の depguard を緩めてレイヤ違反を通す（不変条件5）
+- `.oxlintrc.json` の `no-restricted-imports` を緩めてレイヤ違反を通す（不変条件5・9）
 - 「本質的でない」としてチェックを回さずに済ませる
 
-1周で触る範囲は原則1パッケージまで。範囲が広いほど、落ちたときに原因を特定できなくなる。
+1周で触る範囲は原則1レイヤまで。範囲が広いほど、落ちたときに原因を特定できなくなる。
 
-## Cloudflare への移行（進行中）
+---
 
-**実装言語を Go から TypeScript に変え、Cloudflare Workers + D1 に移す作業を進めている。**
-計画・決定事項・実装の順序はすべて `docs/migration-cloudflare.md` にある。**worker/ を触る前に必ず読むこと。**
+## 設計上の決定
 
-背景は「クレジットカードを登録しない」という制約。GCP は無料枠を使うだけでも請求先アカウントが必須のため、Cloud Run が選択肢から落ちた。
+**すでに決まっていること。** 蒸し返す前に理由を読むこと。
 
-**本番は `https://asset-wish.mochiya.workers.dev` で稼働中。** デプロイは手元から `npm run deploy`。
+### 更新は操作別に分ける
 
-| 段階 | 内容 | 状態 |
+全カラムを上書きする文を置かず、API の操作単位で分ける。
+
+| テーブル | 置く文 | 置かないもの |
 | --- | --- | --- |
-| 1 | `wrangler.jsonc`・`migrations/0001_init.sql` | 完了 |
-| 2 | `worker/src/domain` の移植とテスト | 完了 |
-| 3 | `repository`（D1 アクセス） | 完了 |
-| 4 | `usecase` | 完了 |
-| 5 | `handler`（19経路） | 完了 |
-| 6 | front の接続と静的アセット配信 | 完了 |
-| 7 | `wrangler deploy`・CI の更新 | デプロイ完了。CI からの自動デプロイは未設定 |
-| 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | ← 次はここ |
-
-**`server/`（Go）は段階8まで残す。** 移植元として参照するためであり、まだ動く。上の「技術スタック」表と下の「開発の進め方」は Go 版のもので、移行が終わるまでは両方が有効。
-
-移行にあたって特に効いている決定は以下。詳細と理由は移行計画の10章にある。
-
-- **D1 にトランザクションが無い。** 書き込みは `usecase.WriteOperation` の配列として組み立て、`AtomicWriter` が1回の `db.batch()` に流す。**条件付き UPDATE を並べて後から更新件数を見る書き方は部分書き込みを残す**（実測済み）。先頭に番人の文を置き、以降を `changes() = 1` で塞ぐ。詳細は移行計画の4章
-- **金額は `Money`（branded number）、日付は `IsoDate`、時刻は `Instant`、年月は `YearMonth`。** `Date` を domain に持ち込まない。タイムゾーンを持つ値は日付の意味を壊す
-- **`year_month` は `TEXT 'YYYY-MM'`。** 月初日の `DATE` ではない
-- **「算出不可」は例外ではなく `null`。** `averageSurplus` と `monthsToReach` が該当する。0 と混同しない
-- **不変条件5 の強制は `.oxlintrc.json` の `no-restricted-imports`。** depguard の置き換え。引っかかったらルールではなく設計を直す
-
-## 開発の進め方
-
-設計書 7章の順序に従う。**インフラは最後**に回す。
-
-| 段階 | 内容 | 状態 |
-| --- | --- | --- |
-| 1 | `domain` パッケージとそのテスト | 完了（PR #1） |
-| 2 | DDL・マイグレーション・sqlc 設定 | 完了 |
-| 3 | `repository` 実装 | 完了 |
-| 4 | `usecase`・`handler` | 完了 |
-| 5 | Terraform / GCP | ← 残りはここだけ。実運用したくなった時点で着手 |
-| 6 | front（Vite + React SPA） | 完了 |
-
-段階2で入った決定は以下。いずれも設計書が決めていなかったもの。
-
-| 項目 | 決定 | 理由 |
-| --- | --- | --- |
-| マイグレーション | `goose`（`server/db/migrations/`） | 1ファイルに up/down を書け、`embed.FS` から呼べる。段階3のテストでスキーマを流すのが数行で済む |
-| sqlc のドライバ | `database/sql` + `pgx/v5` stdlib | `docs/detailed-design.md` 4.1 の型変換表が `sql.NullTime` 前提。ドライバ実体は pgx |
-| 生成コードの置き場 | `server/internal/db/` | `.golangci.yml` の depguard が domain からの import を禁じているパスと一致させる |
-| ローカル DB | `server/compose.yaml` の `postgres:16` | CI の `services.postgres` と同一版。「手元では通るのに CI で落ちる」を構造的に潰す |
-| 更新クエリの粒度 | **操作別に分ける**（全カラム上書きの `Update*` を置かない） | 下記 |
-
-### 更新クエリを操作別に分ける
-
-`UpdateWish` のような全カラム上書きのクエリを置かず、API の操作単位でクエリを割る。
-
-| テーブル | 置くクエリ | 置かないもの |
-| --- | --- | --- |
-| `accounts` | `UpdateAccount`（名称・残高のみ） | `kind` を書けるクエリ |
-| `wishes` | `UpdateWishContent` / `UpdateWishStatus` | 両方を1本で書けるクエリ |
-| `lendings` | `UpdateLendingCollectedAmount` | 内容を編集するクエリ（API に無い） |
+| `accounts` | `updateAccountStatement`（名称・残高のみ） | `kind` を書ける文 |
+| `wishes` | `updateWishContentStatement` / `updateWishStatusStatement` | 両方を1本で書ける文 |
+| `lendings` | `updateLendingCollectedStatement` | `amount` を書ける文 |
 
 **理由は、不変条件を型やレビューではなくスキーマ側で支えるため。**
 
@@ -258,42 +211,44 @@ npx playwright test --ui       # E2E を目視で追う
 
 **SQL に無い操作は、上の層がどう間違えても起こせない。** 冗長さと引き換えに、迂回路そのものを消す。
 
-作成系（`CreateWish` など）は全カラムを引数に取ったままでよい。初期状態が `considering` であるといったルールは domain が持つべきで、SQL に定数で書き込むと逆にルールが散る。
+作成系は全カラムを引数に取ったままでよい。初期状態が `considering` であるといったルールは domain が持つべきで、SQL に定数で書き込むと逆にルールが散る。
 
-**新しい更新操作が要るときは、既存の `Update*` に列を足さず、クエリを1本足す。**
+**新しい更新操作が要るときは、既存の文に列を足さず、文を1本足す。**
 
-段階3で入った決定は以下。
-
-| 項目 | 決定 | 理由 |
-| --- | --- | --- |
-| トランザクションの引き回し | `context.Context` に `*sql.Tx` を載せ、`Store.queries(ctx)` が解決する | リポジトリのメソッドが「いまトランザクションの中か」を意識せずに済む。境界を usecase 層だけに置ける（不変条件10） |
-| `RunInTx` の入れ子 | 内側は新しく張らず外側に相乗りする | 内側が独立して張ると、外側が巻き戻っても内側の書き込みだけが残る |
-| 復元時の検証 | `kind` / `status` / `category` を `Valid()` で検証し、不正なら error | CHECK 制約をすり抜けた値をドメイン層に渡さないための最後の関門 |
-| DB を使うテストの直列化 | `internal/dbtest` がアドバイザリロックを取る | go test はパッケージを並行実行する。DB を使うテストが2パッケージ以上になると、同じ public スキーマを同時に作り直して壊し合う |
-
-**DB を使うテストを新しいパッケージに書くときは、必ず `dbtest.Setup` を通すこと。** 自前で接続を開くと直列化とローカル判定の両方が外れる。
-
-段階4で入った決定は以下。
+### D1 の扱い
 
 | 項目 | 決定 | 理由 |
 | --- | --- | --- |
-| 時刻と ID 採番 | `usecase.Clock` / `usecase.IDGenerator` として注入する | 実時刻に依存したテストは日付をまたいだ瞬間に落ちる |
-| handler が依存する型 | usecase の構造体ではなく handler 側に定義したインターフェース | HTTP の関心事だけをスタブで検証できる。手順は usecase のテストが見る |
-| 未知のフィールド | `DisallowUnknownFields` で 400 にする | 送れない項目（`status` / `kind`）を黙って無視すると「変えたつもりが変わっていない」になる |
-| `deadline` の指定 | `json.RawMessage` で受け、キー無し／`null`／日付を区別する | `*string` では「変更しない」と「期限を外す」が同じに見える |
-| middleware の並び | CORS を認証より**外側** | 事前検査（OPTIONS）に `Authorization` は付かない。内側だと 401 でブラウザが本リクエストを送らなくなる |
-| 設定の検証 | 不足・短いトークン・ワイルドカードは起動前に落とす | 公開エンドポイントなので、起動してから「認証が素通り」に気付くのでは遅い |
+| 書き込みの原子性 | 先頭に「読み取り時の値が変わっていないか」だけを見る番人の文を置き、以降を `changes() = 1` で塞ぐ | **条件付き UPDATE を並べて後から更新件数を見る書き方は部分書き込みを残す**（実測済み）。詳細は移行の記録4章 |
+| 競合の扱い | リトライせず `ConflictError`（409） | 握り潰して書き換えるより、気付けるほうがよい |
+| クエリ層 | 生の `db.prepare()` + 手書きの行型 | 依存ゼロ。型と SQL のズレは repository のテストが検出する |
+| 復元時の検証 | `restore` が `kind` / `status` / `category` を検証し、不正なら投げる | CHECK 制約をすり抜けた値をドメイン層に渡さないための最後の関門 |
+| DB を使うテスト | miniflare のローカル D1。`migrations/` をそのまま流す | テスト側に DDL を書き写さない。`resetDb` で毎回消す |
+| 型と値 | 金額は `Money`（branded number）、日付は `IsoDate`、時刻は `Instant`、年月は `YearMonth` | `Date` を domain に持ち込まない。タイムゾーンを持つ値は日付の意味を壊す |
+| `year_month` | `TEXT 'YYYY-MM'` | 月初日の `DATE` ではない。日を持たなければ日がずれる余地が消える |
 
-**エラーは 400 と 422 を必ず分ける。** 形式の誤り（400）は組み立て直す話、業務ルール違反（422）は値や状態を見直す話で、クライアント側の対処がまるで違う。`domain.DomainError` は自動的に 422 になるので、新しい業務ルールを足すときは `domain` にエラーを定義する。
-
-段階6で入った決定は以下。
+### usecase と handler
 
 | 項目 | 決定 | 理由 |
 | --- | --- | --- |
-| 画面の切り替え | ライブラリを入れず hash で持つ（`src/app/router.ts`） | 画面は5つ、入れ子も動的な経路も無い。静的ホスティングに置いてもサーバー側の書き換え設定が要らない |
+| 時刻と ID 採番 | `Clock` / `IDGenerator` として注入する | 実時刻に依存したテストは日付をまたいだ瞬間に落ちる |
+| handler が依存する型 | usecase のクラスではなく handler 側に定義したインターフェース | HTTP の関心事だけをスタブで検証できる。手順は usecase のテストが見る |
+| 未知のフィールド | 受け付けるキーを明示して照合し、外れれば 400 | 送れない項目（`status` / `kind`）を黙って無視すると「変えたつもりが変わっていない」になる |
+| `deadline` の指定 | `key in body` でキー無し／`null`／日付を区別する | 区別しないと「変更しない」と「期限を外す」が同じに見える |
+| 設定の検証 | リクエストのたびに検証し、不足なら 500 | Workers に起動の瞬間が無い。認証を素通りさせないことのほうが、動くことより優先される |
+| 「算出不可」の表現 | 例外ではなく `null` | `averageSurplus` と `monthsToReach` が該当する。0 と混同しない |
+
+**エラーは 400 / 409 / 422 を必ず分ける。** 形式の誤り（400）は組み立て直す話、競合（409）は読み直してやり直す話、業務ルール違反（422）は値や状態を見直す話で、クライアント側の対処がまるで違う。`DomainError` は自動的に 422 になるので、新しい業務ルールを足すときは `domain` にエラーを定義する。
+
+### front
+
+| 項目 | 決定 | 理由 |
+| --- | --- | --- |
+| 画面の切り替え | ライブラリを入れず hash で持つ（`src/app/router.ts`） | 画面は5つ、入れ子も動的な経路も無い |
 | データ取得 | 取得ライブラリを入れず `useAsync`（30行） | 単一ユーザーの画面にキャッシュも楽観更新も要らない。要るのは読み込み中・失敗・再読み込みの3つだけ |
 | 通信の置き場 | `src/api/client.ts` に集約。画面から `fetch` を直に呼ばない | 認証・エラー変換・基底 URL が各画面に散ると、直すときに全画面を触る |
-| E2E の API | Playwright の `page.route` で差し替え、サーバーも DB も起動しない | E2E で見たいのは画面の配線。サーバーの正しさは server 側のテストが持つ |
+| 基底 URL | 空文字（同一オリジン） | **絶対 URL に戻すと CORS が復活する。戻さないこと** |
+| E2E の API | Playwright の `page.route` で差し替え、サーバーも DB も起動しない | E2E で見たいのは画面の配線。サーバーの正しさは worker 側のテストが持つ |
 
 **front で金額の計算をしない。** 実質資産・不足額・到達見込みはサーバーが算出済みの値を受け取って並べるだけ（不変条件8）。ここに式を書くと、同じ計算が2箇所に増えて必ずずれる。`src/lib/format.ts` に置いてよいのは表示整形だけ。
 
@@ -301,7 +256,17 @@ npx playwright test --ui       # E2E を目視で追う
 
 **`src/test/setup.ts` の `afterEach(cleanup)` を消さないこと。** vitest の `globals` を有効にしていないため、Testing Library の自動クリーンアップが働かない。消すと前のテストの DOM が残り、「同じ名前の要素が複数ある」という実装のせいに見える落ち方をする。
 
-**GCP と Terraform は依然として後回し。** アプリの中身に到達する前に消耗する。
+---
+
+## Go から TypeScript への移行について
+
+**2026年7月に完了した。** 経緯・決定・実測した D1 の癖はすべて `docs/migration-cloudflare.md` にある。
+
+きっかけは「クレジットカードを登録しない」という制約。GCP は無料枠を使うだけでも請求先アカウントが必須で、Cloud Run が選択肢から落ちた。言語の縛りを外した瞬間に、カード不要・月額0円・コールドスタート無しを全部満たす構成が現れた、というのが結論。
+
+**設計は変えていない。** レイヤ構成も依存の向きも、リポジトリのインターフェースを usecase 側に置くことも、API の19経路もそのまま。捨てたのは言語とランタイムであって、設計ではない。
+
+Go 版の実装（`server/`）は削除した。読みたい場合は `git log -- server/` から辿れる。
 
 ## やらないこと
 
@@ -314,3 +279,5 @@ npx playwright test --ui       # E2E を目視で追う
 - 確定支出の分割払い
 - ウィッシュの合計金額と実質資産の比較（個別に見る方針で確定済み）
 - App Store / Google Play への公開
+- KV / R2 / Queues / Durable Objects / Workers AI（使う理由が無い）
+- Cloudflare Access による認証（`*.workers.dev` には適用できず、独自ドメインが要る）

@@ -1,9 +1,0 @@
-# このリポジトリで使うツールの版を固定する。
-# CI と手元でずれると「手元では通るのに CI で落ちる」が始まるため、
-# latest ではなく明示的な版を書く。
-#
-# sqlc は .github/workflows/ci.yml の setup-sqlc と同じ版に揃えること。
-# ずれると sqlc diff が生成コードの差分ではなく版差を検出して落ちる。
-[tools]
-sqlc = "1.27.0"
-"aqua:pressly/goose" = "3.27.3"

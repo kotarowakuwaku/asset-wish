@@ -8,30 +8,35 @@
 | 作成日 | 2026-07-26 |
 | 対応要件 | 要件定義書 v1.0 |
 | 対象範囲 | データモデル、ドメイン層、API、パッケージ構成、テスト方針 |
-| 対象外 | Terraform コード、画面ワイヤーフレーム（別途） |
+| 対象外 | 画面ワイヤーフレーム（別途） |
 
 > **注記：** 本書は概観・方針レベルの設計。実装時のシグネチャ・エラーコード・テストケースは `docs/detailed-design.md` を正とする。両者に齟齬があれば詳細設計書に従う。
+
+> **実装言語の変更について（2026-07）：** サーバーの実装は Go + PostgreSQL + Cloud Run から **TypeScript + Cloudflare Workers + D1** に移行した。**この文書が定める設計——データモデル、レイヤ構成、API、用語——はそのまま有効。** 変わったのは言語とランタイムだけである。
+>
+> ただし、**3章のコード例は Go 版の記述**であり、実際のシグネチャは `worker/src/domain/` を見ること。移行で変わった点（`year_month` の型、時刻の持ち方、トランザクションの扱い）は `docs/migration-cloudflare.md` に集約してある。
 
 ---
 
 ## 1. 全体構成
 
 ```
-┌──────────────┐   HTTPS    ┌──────────────┐          ┌──────────┐
-│  ブラウザ    │ ─────────▶ │  Cloud Run   │ ───────▶ │  Neon    │
-│  (front/SPA) │            │  (server/Go) │          │ Postgres │
-└──────────────┘            └──────────────┘          └──────────┘
-      ▲                            ▲
-      │ 静的ホスティング           │ deploy
-      │                            │
-┌─────────────────────────────────────────────┐
-│  GitHub（モノレポ） / GitHub Actions        │
-└─────────────────────────────────────────────┘
-                     │
-                     │ terraform apply
-                     ▼
-              GCP（Cloud Run / Artifact Registry / Budget）
+                    ┌────────────────────────────────┐
+                    │  Cloudflare Worker             │
+┌──────────────┐    │                                │      ┌──────────┐
+│  ブラウザ    │───▶│  /            静的アセット     │      │          │
+│  (front/SPA) │    │               （front/dist）   │      │    D1    │
+└──────────────┘    │  /api/*       Hono のルート    │─────▶│ (SQLite) │
+                    │                                │      │          │
+                    └────────────────────────────────┘      └──────────┘
+                                    ▲
+                                    │ wrangler deploy（手動）
+                    ┌─────────────────────────────────────┐
+                    │  GitHub（モノレポ） / Actions（CI） │
+                    └─────────────────────────────────────┘
 ```
+
+**front と API は同一オリジン。** 同じ Worker が両方を返すため、CORS の設定は存在しない。静的アセットのリクエストは無料枠を消費しない。
 
 ---
 
@@ -40,33 +45,34 @@
 ### 2.1 方針
 
 - 主キーは UUID。クライアント側で採番できるため、オフライン対応を後から入れる余地が残る
-- 金額は `BIGINT`（円単位の整数）。浮動小数点は使わない
+- 金額は整数（円単位）。浮動小数点は使わない。SQLite の `INTEGER` は最大8バイトで足りる
 - **導出できる値はカラムに持たない。** 立替の回収状態は `amount` と `collected_amount` から判定できるため `status` カラムを持たない
 - 制約は DB 側にも書く。ドメイン層のバリデーションと二重になるが、DB は最後の砦として扱う
 
 ### 2.2 DDL
 
+**正は `migrations/0001_init.sql`。** ここは読みやすさのために要点だけを写したもので、齟齬があればマイグレーションに従う。
+
 ```sql
--- 口座
 CREATE TABLE accounts (
-    id          UUID PRIMARY KEY,
-    name        TEXT        NOT NULL,
-    kind        TEXT        NOT NULL CHECK (kind IN ('cash', 'investment')),
-    balance     BIGINT      NOT NULL,
-    updated_at  TIMESTAMPTZ NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id         TEXT    PRIMARY KEY,
+    name       TEXT    NOT NULL,
+    kind       TEXT    NOT NULL CHECK (kind IN ('cash', 'investment')),
+    balance    INTEGER NOT NULL,
+    updated_at TEXT    NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
--- 立替
 CREATE TABLE lendings (
-    id               UUID        PRIMARY KEY,
-    counterparty     TEXT        NOT NULL,
-    description      TEXT        NOT NULL DEFAULT '',
-    amount           BIGINT      NOT NULL CHECK (amount > 0),
-    collected_amount BIGINT      NOT NULL DEFAULT 0 CHECK (collected_amount >= 0),
-    occurred_on      DATE        NOT NULL,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id               TEXT    PRIMARY KEY,
+    counterparty     TEXT    NOT NULL,
+    description      TEXT    NOT NULL DEFAULT '',
+    amount           INTEGER NOT NULL CHECK (amount > 0),
+    collected_amount INTEGER NOT NULL DEFAULT 0 CHECK (collected_amount >= 0),
+    occurred_on      TEXT    NOT NULL
+        CHECK (occurred_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     CONSTRAINT lendings_collected_within_amount
         CHECK (collected_amount <= amount)
 );
@@ -75,53 +81,55 @@ CREATE INDEX idx_lendings_outstanding
     ON lendings (occurred_on DESC)
     WHERE collected_amount < amount;
 
--- ウィッシュ
 CREATE TABLE wishes (
-    id         UUID        PRIMARY KEY,
-    title      TEXT        NOT NULL,
-    amount     BIGINT      NOT NULL CHECK (amount > 0),
-    category   TEXT        NOT NULL CHECK (category IN ('item', 'experience', 'goal')),
-    status     TEXT        NOT NULL CHECK (status IN ('considering', 'committed', 'done', 'dropped')),
-    priority   INTEGER     NOT NULL DEFAULT 0,
-    deadline   DATE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id         TEXT    PRIMARY KEY,
+    title      TEXT    NOT NULL,
+    amount     INTEGER NOT NULL CHECK (amount > 0),
+    category   TEXT    NOT NULL CHECK (category IN ('item', 'experience', 'goal')),
+    status     TEXT    NOT NULL CHECK (status IN ('considering', 'committed', 'done', 'dropped')),
+    priority   INTEGER NOT NULL DEFAULT 0,
+    deadline   TEXT
+        CHECK (deadline IS NULL OR deadline GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX idx_wishes_status_priority ON wishes (status, priority);
 
--- 月次収支
 CREATE TABLE monthly_balances (
-    id         UUID        PRIMARY KEY,
-    year_month DATE        NOT NULL UNIQUE,
-    income     BIGINT      NOT NULL CHECK (income  >= 0),
-    expense    BIGINT      NOT NULL CHECK (expense >= 0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT monthly_balances_is_first_day
-        CHECK (year_month = date_trunc('month', year_month)::date)
+    id         TEXT    PRIMARY KEY,
+    year_month TEXT    NOT NULL UNIQUE
+        CHECK (year_month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+    income     INTEGER NOT NULL CHECK (income  >= 0),
+    expense    INTEGER NOT NULL CHECK (expense >= 0),
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
--- 取引履歴
 CREATE TABLE transactions (
-    id          UUID        PRIMARY KEY,
-    account_id  UUID        NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-    amount      BIGINT      NOT NULL,
-    kind        TEXT        NOT NULL CHECK (kind IN (
+    id          TEXT    PRIMARY KEY,
+    account_id  TEXT    NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    amount      INTEGER NOT NULL,
+    kind        TEXT    NOT NULL CHECK (kind IN (
                     'lending_created', 'lending_collected', 'wish_paid', 'adjustment')),
-    ref_id      UUID,
-    occurred_on DATE        NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    ref_id      TEXT,
+    occurred_on TEXT    NOT NULL
+        CHECK (occurred_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX idx_transactions_account_date ON transactions (account_id, occurred_on DESC);
 ```
 
+SQLite には `UUID` / `DATE` / `TIMESTAMPTZ` の型が無い。**Postgres では型そのものが日付らしさを保証していたが、`TEXT` には何の保証も無いため、型が担っていた検査を `CHECK` + `GLOB` で埋め直している。**
+
 ### 2.3 補足
 
-**`year_month` を DATE で持つ理由**
+**`year_month` を `TEXT 'YYYY-MM'` で持つ理由**
 
-`'2026-07'` のような文字列や `202607` のような整数ではなく、月初日の DATE として持つ。範囲検索がそのまま書け、「直近3ヶ月」の取得が `ORDER BY year_month DESC LIMIT 3` で済む。月初日であることは CHECK 制約で保証する。
+当初は月初日の `DATE` として持ち、`date_trunc` の CHECK で月初日であることを保証していた。SQLite に `date_trunc` が無いこと、および domain・API・front がいずれも `'2026-07'` 形式で年月を扱っていることから、`TEXT` の `'YYYY-MM'` に変更した。
+
+**日を持たなければ、日がずれる余地そのものが消える。** 格納形式とドメイン型 `YearMonth` の表現も一致する。文字列比較で年月順に並ぶため、「直近3ヶ月」は `ORDER BY year_month DESC LIMIT 3` のまま書ける。
 
 **立替の部分インデックス**
 
@@ -485,13 +493,13 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 ### 4.5 認証
 
-単一ユーザーのため、環境変数に設定した固定トークンを `Authorization: Bearer <token>` で検証する方式とする。ユーザー管理・パスワード・セッションは実装しない。
+単一ユーザーのため、固定トークンを `Authorization: Bearer <token>` で検証する方式とする。ユーザー管理・パスワード・セッションは実装しない。
 
-Cloud Run のサービスは公開（未認証呼び出し許可）とし、認可はアプリケーション側で行う。トークンはブラウザの `localStorage` に保管する。XSS があれば読まれる置き場所だが、単一ユーザーかつ自分の端末のみという前提のもとで許容する（要件定義書 6章）。
+トークンは `wrangler secret put AUTH_TOKEN` で登録し、`worker/src/infra/config.ts` でのみ読む。**32文字未満なら起動を拒む。** 公開エンドポイントに短いトークンを置くと総当たりが現実的になるため。Workers に起動の瞬間が無いので、検証はリクエストのたびに行い、不足していれば 500 で落とす。**認証を素通りさせないことのほうが、動くことより優先される。**
 
-front は別オリジンから API を呼ぶため、CORS の許可オリジンを環境変数で受け取る。ワイルドカードは使わない。
+Worker は公開（誰でも到達できる）とし、認可はアプリケーション側で行う。トークンはブラウザの `localStorage` に保管する。XSS があれば読まれる置き場所だが、単一ユーザーかつ自分の端末のみという前提のもとで許容する（要件定義書 6章）。
 
-> Cloudflare への移行後、front と API は同一オリジンになったため CORS の設定は無くなった。トークンは `wrangler secret put AUTH_TOKEN` で登録し、`localStorage` に保管する点は変わらない（`docs/migration-cloudflare.md`）。
+**front と API は同一オリジンのため CORS の設定は無い。**
 
 #### 将来の検討：ログイン方式を変える
 
@@ -523,39 +531,41 @@ B なら同一オリジンになった利点を活かして、セッションを
 ## 5. パッケージ構成
 
 ```
-server/
-├── cmd/
-│   └── api/
-│       └── main.go              依存の組み立て（手書き DI）、HTTP サーバ起動
-├── internal/
+wrangler.jsonc                   Worker 定義。D1 binding、静的アセット
+migrations/
+└── 0001_init.sql                D1 のスキーマ。wrangler d1 migrations が管理
+worker/
+├── src/
 │   ├── domain/                  外部依存ゼロ。ここだけで完結してテストできること
-│   │   ├── money.go
-│   │   ├── account.go
-│   │   ├── lending.go
-│   │   ├── wish.go
-│   │   ├── monthly_balance.go
-│   │   ├── transaction.go       残高が動いた記録。実質資産の計算には使わない
-│   │   ├── networth.go          実質資産・不足額・到達見込みの純粋関数
-│   │   └── errors.go            ドメインエラーの定義
+│   │   ├── money.ts
+│   │   ├── time.ts              IsoDate / Instant（Date は持ち込まない）
+│   │   ├── yearMonth.ts
+│   │   ├── account.ts
+│   │   ├── lending.ts
+│   │   ├── wish.ts
+│   │   ├── monthlyBalance.ts
+│   │   ├── transaction.ts       残高が動いた記録。実質資産の計算には使わない
+│   │   ├── netAsset.ts          実質資産・不足額・到達見込みの純粋関数
+│   │   └── errors.ts            ドメインエラーの定義
 │   ├── usecase/
-│   │   ├── port.go              リポジトリのインターフェース定義
-│   │   ├── account.go
-│   │   ├── lending.go
-│   │   ├── wish.go
-│   │   ├── monthly_balance.go
-│   │   └── dashboard.go
+│   │   ├── port.ts              リポジトリのインターフェース、WriteOperation、Clock
+│   │   ├── account.ts
+│   │   ├── lending.ts
+│   │   ├── wish.ts
+│   │   ├── monthlyBalance.ts
+│   │   ├── transaction.ts
+│   │   └── dashboard.ts
 │   ├── adapter/
-│   │   ├── handler/             HTTP ハンドラ、JSON 変換、エラー→ステータス変換
-│   │   └── repository/          sqlc 生成コードを usecase のインターフェースに適合させる
-│   └── infra/
-│       ├── db.go                DB 接続
-│       └── config.go            環境変数の読み込み
-├── db/
-│   ├── migrations/              マイグレーション SQL
-│   └── queries/                 sqlc の入力となる SQL
-├── sqlc.yaml
-└── go.mod
+│   │   ├── handler/             Hono のルート、DTO、リクエストの解釈、エラー→ステータス
+│   │   └── repository/          D1 アクセス。行とドメイン型の相互変換
+│   │       └── writer.ts        書き込みを1回の batch にまとめる（不変条件10）
+│   ├── infra/
+│   │   └── config.ts            secret の読み出しと検証
+│   └── index.ts                 依存の組み立て（手書き DI）とエントリポイント
+└── test/                        fake・スタブ・テスト用の道具
 ```
+
+テストは実装の隣に置く（`money.ts` と `money.test.ts`）。Go の `_test.go` と同じ考え方で、対応が目で追える。
 
 ### 5.1 依存の向き
 
@@ -568,33 +578,38 @@ handler ──▶ usecase ──▶ domain
 
 **リポジトリのインターフェースは `usecase` パッケージに置く。** 実装は `adapter/repository` にあるが、インターフェースを使う側が定義することで、usecase が adapter に依存しない形になる（依存性逆転）。
 
-```go
-// internal/usecase/port.go
-package usecase
-
-type WishRepository interface {
-    List(ctx context.Context, status *domain.WishStatus) ([]domain.Wish, error)
-    Get(ctx context.Context, id uuid.UUID) (domain.Wish, error)
-    Create(ctx context.Context, w domain.Wish) error
-    // 内容の更新と状態遷移を1本にまとめない。まとめると、遷移の可否を
-    // 判定する domain のメソッドを迂回して status を書ける経路ができる。
-    UpdateContent(ctx context.Context, w domain.Wish) error
-    UpdateStatus(ctx context.Context, w domain.Wish) error
-    Delete(ctx context.Context, id uuid.UUID) error
+```ts
+// worker/src/usecase/port.ts
+export interface WishRepository {
+  list(status: WishStatus | null): Promise<Wish[]>
+  get(id: string): Promise<Wish>
+  create(w: Wish): Promise<void>
+  // 内容の更新と状態遷移を1本にまとめない。まとめると、遷移の可否を
+  // 判定する domain のメソッドを迂回して status を書ける経路ができる。
+  updateContent(w: Wish): Promise<void>
+  delete(id: string): Promise<void>
 }
 ```
 
-全インターフェースの定義は `docs/detailed-design.md` 3.1 を参照する。
+状態遷移はリポジトリのメソッドではなく `WriteOperation` として扱う（5.3）。全インターフェースの定義は `worker/src/usecase/port.ts` を正とする。
 
 ### 5.2 変換の責務
 
-sqlc が生成する構造体（`db.Wish` など）と、ドメインのエンティティ（`domain.Wish`）は別物として扱う。相互変換は `adapter/repository` の責務とし、生成コードをドメイン層に持ち込まない。
+D1 が返す行（`WishRow` など）と、ドメインのエンティティ（`Wish`）は別物として扱う。相互変換は `adapter/repository` の責務とし、行の型をドメイン層に持ち込まない。
+
+行から復元するときは `restore` を通し、`kind` / `status` / `category` を検証する。**CHECK 制約をすり抜けた値をドメイン層に渡さないための最後の関門。**
 
 冗長に見えるが、この境界があることで DB スキーマの変更がドメイン層に波及しなくなる。学習目的の中心にあたる部分。
 
-### 5.3 トランザクション境界
+### 5.3 書き込みの原子性
 
-複数テーブルを更新する操作（立替の回収 → 口座残高の更新 → 取引履歴の記録）は、usecase 層でトランザクションを張る。トランザクションの制御を handler や repository に散らさない。
+複数テーブルを更新する操作（立替の回収 → 口座残高の更新 → 取引履歴の記録）は、**usecase が `WriteOperation` の配列として組み立て**、`AtomicWriter` が1回の `db.batch()` に流す。書き込みの制御を handler や repository に散らさない。
+
+D1 は `BEGIN` を受け付けないため、Go 版の `RunInTx` に相当するものは無い。`batch()` が1回の呼び出し＝1つのトランザクションとして働く。
+
+読み取りと書き込みの間に判断が挟まるため、**読み取った時点の値を `expected*` として持ち回り、書き込み時に変わっていれば競合（409）にする。** 楽観ロックの実現方法は `adapter/repository/writer.ts` が持ち、usecase は「何を書くか」だけを知る。
+
+**素朴に条件付き UPDATE を並べると部分書き込みが残る。** その実測と対策は `docs/migration-cloudflare.md` 4章にある。
 
 ---
 
@@ -603,15 +618,18 @@ sqlc が生成する構造体（`db.Wish` など）と、ドメインのエン�
 | 層 | 手法 | 対象 |
 | --- | --- | --- |
 | domain | ユニットテスト（テーブル駆動） | 計算ロジック、状態遷移。DB 不要 |
-| usecase | 手書きの fake リポジトリ | オーケストレーション、トランザクション境界 |
-| handler | `net/http/httptest` | ステータスコード、JSON 形式 |
-| repository | 実 DB（ローカル Postgres） | SQL の正しさ、制約 |
+| usecase | 手書きの fake リポジトリ | 手順、楽観ロックに渡す値 |
+| handler | Hono の `app.request()` にスタブを差す | ステータスコード、JSON 形式 |
+| handler（統合） | 実 D1 + 実 usecase + 実 repository | 結線。スタブでは落ちない間違いを拾う |
+| repository | 実 D1（miniflare のローカル） | SQL の正しさ、制約 |
 | front（ロジック） | Vitest | 表示整形、入力バリデーション |
 | front（E2E） | Playwright | 主要導線が実際に動くこと |
 
 モックライブラリは導入せず、インターフェースを手書きの fake で満たす。定義したインターフェースが実装しやすいかどうかが、そのまま設計の良し悪しのフィードバックになるため。
 
-front 側は、上記すべてを単一のコマンドに束ねる。開発を AI エージェントのループで進めるため、**エージェントに渡す停止条件が一本のコマンドで表現できること**を要件とする（要件定義書 7.2）。
+サーバー側のテストは **workerd の中で走る**（`@cloudflare/vitest-pool-workers`）。本番と同じランタイムで実行されるため、Node の API に依存した実装が紛れ込めばテストが落ちる。D1 は miniflare がローカルに用意し、`migrations/` の DDL をそのまま流す。**テスト側に DDL を書き写さない。**
+
+front 側も worker 側も、上記すべてを単一のコマンドに束ねる。開発を AI エージェントのループで進めるため、**エージェントに渡す停止条件が一本のコマンドで表現できること**を要件とする（要件定義書 7.2）。
 
 ```json
 "check": "npm run typecheck && npm run lint && npm run test && npm run e2e"
@@ -621,7 +639,7 @@ front 側は、上記すべてを単一のコマンドに束ねる。開発を A
 
 ### 6.1 最初に書くべきテストケース
 
-`domain/networth_test.go` から着手する。DB もサーバーも不要で、今日から書ける。
+`worker/src/domain/netAsset.test.ts` に相当する部分から着手した。DB もサーバーも不要で、最初に書ける。
 
 | # | ケース | 期待 |
 | --- | --- | --- |
@@ -651,13 +669,18 @@ front 側は、上記すべてを単一のコマンドに束ねる。開発を A
 
 ## 7. 実装の進め方
 
-| 段階 | 内容 | 前提 |
-| --- | --- | --- |
-| 1 | `domain` パッケージと 6.1 のテスト | なし。今すぐ着手できる |
-| 2 | DDL とマイグレーション、sqlc の設定 | ローカル Postgres |
-| 3 | `repository` 実装とテスト | 同上 |
-| 4 | `usecase`、`handler` | — |
-| 5 | Terraform（Cloud Run / Artifact Registry / 予算アラート / GCS backend） | GCP プロジェクト |
-| 6 | front（Vite + React SPA） | API が動くこと |
+**本文書が定めた設計は実装済み。** 現在の構成と検証方法は `CLAUDE.md` を参照する。
 
-段階1はインフラを一切用意せずに進められる。**先に Terraform や GCP の設定から入ると、アプリの中身に到達する前に消耗しやすい。** ドメイン層が固まってからインフラに向かう順序を推奨する。
+当初は以下の順序で進めた。**インフラを最後に回す**方針は変えていない。先に配置や権限の設定から入ると、アプリの中身に到達する前に消耗するため。
+
+| 段階 | 内容 |
+| --- | --- |
+| 1 | `domain` と 6.1 のテスト（インフラ不要） |
+| 2 | DDL とマイグレーション |
+| 3 | `repository` 実装とテスト |
+| 4 | `usecase` |
+| 5 | `handler` |
+| 6 | front |
+| 7 | デプロイ |
+
+段階1はインフラを一切用意せずに進められる。ドメイン層が固まってからインフラに向かうこと。

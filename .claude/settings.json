@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-go-fast.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-fast.sh",
             "timeout": 60
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-go-full.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-full.sh",
             "timeout": 180
           }
         ]

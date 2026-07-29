@@ -1,5 +1,8 @@
 # 詳細設計書
 
+> **実装言語の変更について（2026-07）：** サーバーの実装は Go から TypeScript（Cloudflare Workers + D1）に移行した。**本書が定めるシグネチャ・エラーコード・テストケースの意図はそのまま有効**だが、**コード例は Go 版の記述**である。実際のシグネチャは `worker/src/` を正とする。移行で変わった点は `docs/migration-cloudflare.md` に集約してある。
+
+
 個人資産・ウィッシュ管理アプリ
 
 | 項目 | 内容 |
@@ -20,7 +23,7 @@
 ## 1. パッケージとファイル
 
 ```
-server/internal/domain/
+worker/src/domain/
 ├── errors.go           ドメインエラーの型と定義
 ├── money.go            Money
 ├── year_month.go       YearMonth
@@ -693,9 +696,9 @@ type TxManager interface {
 
 ### 4.1 型変換の対応表
 
-`adapter/repository` の責務。sqlc 生成型とドメイン型を相互変換する。
+`adapter/repository` の責務。D1 が返す行とドメイン型を相互変換する。
 
-| ドメイン | DB（sqlc 生成型） | 変換 |
+| ドメイン | DB（行の型） | 変換 |
 | --- | --- | --- |
 | `Money` | `int64` | 直接キャスト |
 | `YearMonth` | `time.Time`（DATE） | 保存時 `ym.FirstDay()`、復元時 `domain.FromTime(t)` |
@@ -721,9 +724,9 @@ type TxManager interface {
 
 ---
 
-## 5. sqlc クエリ
+## 5. クエリ
 
-`server/db/queries/` に配置する。
+SQL は `worker/src/adapter/repository/` の各ファイルに、文を作る関数として置く。
 
 ### 5.1 accounts.sql
 
@@ -1150,4 +1153,4 @@ docs: 詳細設計書を追加
 
 `networth.go` が最後になるのは、他のすべてに依存するため。ただし**最も重要なのはここ**なので、テストケース（7.2 の A〜D）は先に眺めておくとよい。
 
-段階1が終わった時点で、`go test ./internal/domain/...` が DB もサーバーも GCP もなしに通る状態になる。
+段階1が終わった時点で、`npm run test` の domain 部分が DB もサーバーもなしに通る状態になる。

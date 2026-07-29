@@ -1,8 +1,8 @@
-# Cloudflare 移行計画
+# Cloudflare 移行の記録
 
-Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画。
+Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 へ移した記録。
 
-**状態：段階7まで完了。本番稼働中。** 残りは段階8（`server/` の削除とドキュメント整理）だけ。
+**状態：移行完了（2026-07）。** 全8段階が終わり、`server/`（Go 版）は削除した。
 
 | | |
 | --- | --- |
@@ -10,7 +10,8 @@ Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画�
 | D1 | `asset-wish`（APAC）。`database_id` は `wrangler.jsonc` にある |
 | 認証 | `AUTH_TOKEN` を `wrangler secret put` で登録済み |
 | デプロイ | 手動（`npm run deploy`）。CI からの自動デプロイは未設定 |
-決定事項は10章、実装の順序は11章にある。
+
+**本書は以後、移行の記録として読む。** 現在の構成と手順は `CLAUDE.md` と `SETUP.md` を正とする。この文書の価値は、**実測して分かった D1 の癖**（4章）と、**なぜその形にしたかの理由**（10章）にある。Go 版の実装を読みたい場合は `git log -- server/` から辿れる。
 
 ---
 
