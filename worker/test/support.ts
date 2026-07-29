@@ -67,13 +67,19 @@ export function expectDomainError(fn: () => unknown, code: DomainErrorCode): voi
   expect.fail(`DomainError(${code}) を期待したが、何も投げられなかった`)
 }
 
-/** code が null なら「投げないこと」を、そうでなければその DomainError を検証する。 */
-export function expectDomainErrorOrNone(fn: () => unknown, code: DomainErrorCode | null): void {
-  if (code === null) {
-    fn()
+/** promise が指定した code の DomainError で失敗することを検証する。 */
+export async function expectRejectedDomainError(
+  promise: Promise<unknown>,
+  code: DomainErrorCode,
+): Promise<void> {
+  try {
+    await promise
+  } catch (err) {
+    if (!isDomainError(err)) throw err
+    expect(err.code).toBe(code)
     return
   }
-  expectDomainError(fn, code)
+  expect.fail(`DomainError(${code}) を期待したが、何も投げられなかった`)
 }
 
 export type { Money }

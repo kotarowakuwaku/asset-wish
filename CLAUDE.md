@@ -196,8 +196,8 @@ npx playwright test --ui       # E2E を目視で追う
 | --- | --- | --- |
 | 1 | `wrangler.jsonc`・`migrations/0001_init.sql` | 完了 |
 | 2 | `worker/src/domain` の移植とテスト | 完了 |
-| 3 | `repository`（D1 アクセス） | ← 次はここ |
-| 4 | `usecase` | |
+| 3 | `repository`（D1 アクセス） | 完了 |
+| 4 | `usecase` | ← 次はここ |
 | 5 | `handler`（19経路） | |
 | 6 | front の接続と静的アセット配信 | |
 | 7 | `wrangler deploy`・CI の更新 | |
@@ -207,7 +207,7 @@ npx playwright test --ui       # E2E を目視で追う
 
 移行にあたって特に効いている決定は以下。詳細と理由は移行計画の10章にある。
 
-- **D1 にトランザクションが無い。** 書き込みは `db.batch()` にまとめ、UPDATE の WHERE に読み取り時の値を含めて楽観ロックにする。更新件数が0なら競合としてエラーにする
+- **D1 にトランザクションが無い。** 書き込みは `usecase.WriteOperation` の配列として組み立て、`AtomicWriter` が1回の `db.batch()` に流す。**条件付き UPDATE を並べて後から更新件数を見る書き方は部分書き込みを残す**（実測済み）。先頭に番人の文を置き、以降を `changes() = 1` で塞ぐ。詳細は移行計画の4章
 - **金額は `Money`（branded number）、日付は `IsoDate`、時刻は `Instant`、年月は `YearMonth`。** `Date` を domain に持ち込まない。タイムゾーンを持つ値は日付の意味を壊す
 - **`year_month` は `TEXT 'YYYY-MM'`。** 月初日の `DATE` ではない
 - **「算出不可」は例外ではなく `null`。** `averageSurplus` と `monthsToReach` が該当する。0 と混同しない
