@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "asset-wish",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2025-11-01",
+
+  // front のビルド成果物を同一 Worker から配信する。
+  // これで front と API が同一オリジンになり、CORS が構造的に消える。
+  //
+  // run_worker_first を指定しないと、/api/* に対応する静的ファイルが無いために
+  // not_found_handling が働き、API 呼び出しに index.html が返る。
+  // 静的アセットの配信は Worker より手前で行われるため、ここで穴を開けておく。
+  "assets": {
+    "directory": "./front/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "asset-wish",
+      // 実際の D1 を作るまでの仮置き。`wrangler d1 create asset-wish` の
+      // 出力で置き換える。ローカル（--local / vitest）はこの値を見ない。
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

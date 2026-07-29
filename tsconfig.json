@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/vitest-pool-workers/types"],
+    "skipLibCheck": true,
+
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "noEmit": true,
+
+    /* Linting。front/tsconfig.app.json と揃える。
+       erasableSyntaxOnly は enum やパラメータプロパティを禁じる。
+       型注釈を消すだけで JS になる範囲に収める。 */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["worker", "vitest.config.ts", "worker-configuration.d.ts"]
+}

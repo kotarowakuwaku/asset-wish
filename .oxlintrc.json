@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "import"],
+  "rules": {
+    "no-console": "error"
+  },
+  "overrides": [
+    {
+      // 不変条件5：domain は外部依存ゼロ。
+      // Go では .golangci.yml の depguard が担っていた検査をここに移した
+      // （docs/migration-cloudflare.md 10章 #5）。
+      //
+      // ここに引っかかったら、ルールを緩めるのではなく設計を直す。
+      "files": ["worker/src/domain/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/adapter/**",
+                  "**/usecase/**",
+                  "**/infra/**",
+                  "hono",
+                  "hono/*",
+                  "cloudflare:*",
+                  "node:*"
+                ],
+                "message": "domain は外部依存ゼロ（不変条件5）。依存の向きは handler → usecase → domain。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
