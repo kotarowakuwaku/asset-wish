@@ -131,6 +131,13 @@ goose -dir db/migrations postgres "$DATABASE_URL" up      # マイグレーシ�
 goose -dir db/migrations postgres "$DATABASE_URL" status  # 適用状況
 goose -dir db/migrations postgres "$DATABASE_URL" down    # 1つ戻す
 
+# worker（Cloudflare 移行中。リポジトリのルートで実行する）
+npm run check                  # typecheck + oxlint + vitest。ループの停止条件
+npm run test                   # vitest のみ。workerd の中で走る
+npm run types                  # worker-configuration.d.ts を生成（typecheck の前に自動で走る）
+npm run migrate:local          # ローカル D1 にマイグレーションを当てる
+npx wrangler d1 execute asset-wish --local --command "SELECT ..."
+
 # front
 cd front
 npm run check                  # typecheck + oxlint + vitest + playwright。ループの停止条件
@@ -153,6 +160,8 @@ npx playwright test --ui       # E2E を目視で追う
    | --- | --- |
    | `server/` | `gofmt -l .` / `go vet ./...` / `go test ./...` / `golangci-lint run` |
    | `server/db/`（スキーマ・クエリ） | 上記に加えて `sqlc generate` → `sqlc diff`、および `DATABASE_URL` を設定した状態での `go test ./db/...` |
+   | `worker/` | ルートで `npm run check`（typecheck + oxlint + vitest） |
+   | `migrations/`（D1 スキーマ） | 上記に加えて `npm run migrate:local` が通ること |
    | `front/` | `npm run check`（typecheck + oxlint + vitest + playwright） |
    | `infra/` | `terraform fmt -check -recursive` / `terraform validate` |
 
@@ -175,6 +184,34 @@ npx playwright test --ui       # E2E を目視で追う
 - 「本質的でない」としてチェックを回さずに済ませる
 
 1周で触る範囲は原則1パッケージまで。範囲が広いほど、落ちたときに原因を特定できなくなる。
+
+## Cloudflare への移行（進行中）
+
+**実装言語を Go から TypeScript に変え、Cloudflare Workers + D1 に移す作業を進めている。**
+計画・決定事項・実装の順序はすべて `docs/migration-cloudflare.md` にある。**worker/ を触る前に必ず読むこと。**
+
+背景は「クレジットカードを登録しない」という制約。GCP は無料枠を使うだけでも請求先アカウントが必須のため、Cloud Run が選択肢から落ちた。
+
+| 段階 | 内容 | 状態 |
+| --- | --- | --- |
+| 1 | `wrangler.jsonc`・`migrations/0001_init.sql` | 完了 |
+| 2 | `worker/src/domain` の移植とテスト | 完了 |
+| 3 | `repository`（D1 アクセス） | ← 次はここ |
+| 4 | `usecase` | |
+| 5 | `handler`（19経路） | |
+| 6 | front の接続と静的アセット配信 | |
+| 7 | `wrangler deploy`・CI の更新 | |
+| 8 | `server/` の削除、`CLAUDE.md` と `docs/` の更新 | |
+
+**`server/`（Go）は段階8まで残す。** 移植元として参照するためであり、まだ動く。上の「技術スタック」表と下の「開発の進め方」は Go 版のもので、移行が終わるまでは両方が有効。
+
+移行にあたって特に効いている決定は以下。詳細と理由は移行計画の10章にある。
+
+- **D1 にトランザクションが無い。** 書き込みは `db.batch()` にまとめ、UPDATE の WHERE に読み取り時の値を含めて楽観ロックにする。更新件数が0なら競合としてエラーにする
+- **金額は `Money`（branded number）、日付は `IsoDate`、時刻は `Instant`、年月は `YearMonth`。** `Date` を domain に持ち込まない。タイムゾーンを持つ値は日付の意味を壊す
+- **`year_month` は `TEXT 'YYYY-MM'`。** 月初日の `DATE` ではない
+- **「算出不可」は例外ではなく `null`。** `averageSurplus` と `monthsToReach` が該当する。0 と混同しない
+- **不変条件5 の強制は `.oxlintrc.json` の `no-restricted-imports`。** depguard の置き換え。引っかかったらルールではなく設計を直す
 
 ## 開発の進め方
 

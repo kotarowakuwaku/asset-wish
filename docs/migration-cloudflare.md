@@ -2,7 +2,8 @@
 
 Go + PostgreSQL + Cloud Run から、Cloudflare Workers + D1 への移行計画。
 
-**状態：10章の未決定事項を全件決定済み。11章の順序で着手する。**
+**状態：段階1（足場・スキーマ）と段階2（domain の移植）が完了。次は段階3（repository）。**
+決定事項は10章、実装の順序は11章にある。
 
 ---
 
@@ -147,7 +148,7 @@ D1 は `BEGIN TRANSACTION` / `SAVEPOINT` を受け付けない。SQLite は書�
 | `CalculateInvestmentTotal` | 同名 | |
 | `CalculateShortfall` | 同名 | |
 | `AverageSurplus` | 同名 | 引数のスライスを変更しない性質を維持する |
-| `MonthsToReach` | 同名 | **切り上げ除算 `(a + b - 1) / b`。浮動小数点を経由しない性質を必ず保つ** |
+| `MonthsToReach` | `monthsToReach` | 切り上げ。JavaScript の除算は必ず浮動小数点を経由するため `(a + b - 1) / b` は再現できず、`Math.ceil` にした。Money は安全整数の範囲の円額であり、この規模では整数除算と一致する |
 | `Wish.Commit` / `Pay` / `Drop` | 同名 | 状態遷移の可否判定（不変条件6） |
 | `Lending.Outstanding` | 同名 | `amount - collected_amount`（不変条件4） |
 | `Account.CountsTowardNetAsset` | 同名 | 投資口座を除外（不変条件1） |

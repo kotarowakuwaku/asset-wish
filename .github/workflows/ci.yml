@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       server: ${{ steps.filter.outputs.server }}
+      worker: ${{ steps.filter.outputs.worker }}
       front: ${{ steps.filter.outputs.front }}
       infra: ${{ steps.filter.outputs.infra }}
     steps:
@@ -34,6 +35,16 @@ jobs:
           filters: |
             server:
               - 'server/**'
+              - '.github/workflows/ci.yml'
+            worker:
+              - 'worker/**'
+              - 'migrations/**'
+              - 'wrangler.jsonc'
+              - 'vitest.config.ts'
+              - 'tsconfig.json'
+              - '.oxlintrc.json'
+              - 'package.json'
+              - 'package-lock.json'
               - '.github/workflows/ci.yml'
             front:
               - 'front/**'
@@ -115,6 +126,30 @@ jobs:
           DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
         run: go test -race ./...
 
+  # Cloudflare Workers 側。テストは workerd の中で走るため、Node の API に
+  # 依存した実装が紛れ込むとここで落ちる。
+  worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # typecheck + oxlint + vitest。ローカルの停止条件と同一のコマンド。
+      # typecheck の前に wrangler types が走り、生成物の古さを構造的に潰す。
+      - run: npm run check
+        env:
+          WRANGLER_SEND_METRICS: false
+
   front:
     needs: changes
     if: needs.changes.outputs.front == 'true'
@@ -179,7 +214,7 @@ jobs:
   # 新しいジョブを足したら needs にも必ず追加すること。忘れるとそのジョブは
   # 保護の対象外になり、静かに検証の網から漏れる。
   ci:
-    needs: [changes, server, front, infra]
+    needs: [changes, server, worker, front, infra]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -188,6 +223,7 @@ jobs:
           RESULTS: >-
             changes=${{ needs.changes.result }}
             server=${{ needs.server.result }}
+            worker=${{ needs.worker.result }}
             front=${{ needs.front.result }}
             infra=${{ needs.infra.result }}
         run: |
