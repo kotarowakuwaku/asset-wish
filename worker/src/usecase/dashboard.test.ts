@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { newFakes } from '../../test/fakes'
-import { SOME_DATE, SOME_INSTANT, yen } from '../../test/support'
+import { fixedClock, newFakes } from '../../test/fakes'
+import { instantOf, isoDateOf, SOME_DATE, SOME_INSTANT, yen } from '../../test/support'
+
+const NOW = instantOf('2026-07-29T00:00:00Z')
 import { Account, type AccountKind } from '../domain/account'
 import { Lending } from '../domain/lending'
 import { MonthlyBalance } from '../domain/monthlyBalance'
@@ -15,7 +17,13 @@ let seq = 0
 beforeEach(() => {
   fakes = newFakes()
   seq = 0
-  usecase = new DashboardUsecase(fakes.accounts, fakes.lendings, fakes.wishes, fakes.balances)
+  usecase = new DashboardUsecase(
+    fakes.accounts,
+    fakes.lendings,
+    fakes.wishes,
+    fakes.balances,
+    fixedClock(NOW),
+  )
 })
 
 const nextId = () => `id-${++seq}`
@@ -30,7 +38,12 @@ function seedLending(amount: number, collected: number): void {
   )
 }
 
-function seedWish(amount: number, status: WishStatus, title = 'テスト'): void {
+function seedWish(
+  amount: number,
+  status: WishStatus,
+  title = 'テスト',
+  deadline: string | null = null,
+): void {
   fakes.wishes.seed(
     Wish.restore(nextId(), {
       title,
@@ -38,7 +51,7 @@ function seedWish(amount: number, status: WishStatus, title = 'テスト'): void
       category: 'item',
       status,
       priority: 0,
-      deadline: null,
+      deadline: deadline === null ? null : isoDateOf(deadline),
     }),
   )
 }
@@ -130,6 +143,54 @@ describe('ウィッシュの一覧', () => {
 
     expect(w.shortfall).toBe(-400_000)
     expect(w.monthsToReach).toBeNull()
+  })
+})
+
+// 平均月間余剰に依存しない。期限が決まっていれば必ず出せる。
+describe('期限までに毎月いくら貯めればよいか', () => {
+  it('残り月数で不足額を割る（当月を含める）', async () => {
+    seedAccount('cash', 500_000)
+    seedWish(800_000, 'considering', 'テスト', '2026-10-31')
+
+    // 不足額 300,000。2026-07 から 2026-10 まで残り3ヶ月＋当月＝4ヶ月。
+    expect((await usecase.get()).wishes[0].monthlySavingNeeded).toBe(75_000)
+  })
+
+  it('期限が当月なら全額（今月中に払う、という意味）', async () => {
+    seedAccount('cash', 500_000)
+    seedWish(800_000, 'considering', 'テスト', '2026-07-31')
+
+    expect((await usecase.get()).wishes[0].monthlySavingNeeded).toBe(300_000)
+  })
+
+  it('期限が無ければ null', async () => {
+    seedAccount('cash', 500_000)
+    seedWish(800_000, 'considering')
+
+    expect((await usecase.get()).wishes[0].monthlySavingNeeded).toBeNull()
+  })
+
+  it('期限が過ぎていれば null（0 を返すと達成済みに見える）', async () => {
+    seedAccount('cash', 500_000)
+    seedWish(800_000, 'considering', 'テスト', '2026-06-30')
+
+    expect((await usecase.get()).wishes[0].monthlySavingNeeded).toBeNull()
+  })
+
+  it('すでに手が届くなら null', async () => {
+    seedAccount('cash', 900_000)
+    seedWish(800_000, 'considering', 'テスト', '2026-12-31')
+
+    expect((await usecase.get()).wishes[0].monthlySavingNeeded).toBeNull()
+  })
+
+  it('月次収支が無くても出せる（到達見込みは算出不可でも）', async () => {
+    seedAccount('cash', 500_000)
+    seedWish(800_000, 'considering', 'テスト', '2026-10-31')
+
+    const [w] = (await usecase.get()).wishes
+    expect(w.monthsToReach).toBeNull()
+    expect(w.monthlySavingNeeded).toBe(75_000)
   })
 })
 

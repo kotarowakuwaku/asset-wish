@@ -49,6 +49,15 @@ export function toInstant(d: Date): Instant {
   return d.toISOString() as Instant
 }
 
+/**
+ * 年月部分を 'YYYY-MM' として取り出す。YearMonth.parse に渡せる。
+ *
+ * IsoDate も Instant も先頭が 'YYYY-MM-DD' で始まるため、どちらも受けられる。
+ */
+export function yearMonthOf(value: IsoDate | Instant): string {
+  return value.slice(0, 7)
+}
+
 /** 2つの時刻の差をミリ秒で返す。a - b。 */
 export function instantDiffMillis(a: Instant, b: Instant): number {
   return Date.parse(a) - Date.parse(b)

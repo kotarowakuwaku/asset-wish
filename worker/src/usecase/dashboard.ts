@@ -5,13 +5,17 @@ import {
   calculateBreakdown,
   calculateInvestmentTotal,
   calculateShortfall,
+  monthlySavingNeeded,
   monthsToReach,
   netAsset,
   type NetAssetBreakdown,
 } from '../domain/netAsset'
+import { yearMonthOf } from '../domain/time'
 import { isTerminalWishStatus, type Wish } from '../domain/wish'
+import { YearMonth } from '../domain/yearMonth'
 import type {
   AccountRepository,
+  Clock,
   LendingRepository,
   MonthlyBalanceRepository,
   WishRepository,
@@ -23,6 +27,8 @@ export type DashboardWish = {
   shortfall: Money
   /** 平均月間余剰が 0 以下、またはデータが無い場合は null（算出不可）。0 と混同しない。 */
   monthsToReach: number | null
+  /** 期限までに毎月いくら貯めればよいか。期限が無い・過ぎている・達成済みなら null。 */
+  monthlySavingNeeded: Money | null
 }
 
 /** トップ画面に必要な値をまとめたもの。ラウンドトリップを減らすため1本にまとめる。 */
@@ -40,17 +46,22 @@ export class DashboardUsecase {
   readonly #lendings: LendingRepository
   readonly #wishes: WishRepository
   readonly #balances: MonthlyBalanceRepository
+  // 「期限まであと何ヶ月あるか」を出すのに現在の年月が要る。実時刻を直に
+  // 読むとテストが月をまたいだ瞬間に落ちる。
+  readonly #now: Clock
 
   constructor(
     accounts: AccountRepository,
     lendings: LendingRepository,
     wishes: WishRepository,
     balances: MonthlyBalanceRepository,
+    now: Clock,
   ) {
     this.#accounts = accounts
     this.#lendings = lendings
     this.#wishes = wishes
     this.#balances = balances
+    this.#now = now
   }
 
   /**
@@ -67,6 +78,7 @@ export class DashboardUsecase {
       this.#balances.listRecent(AVERAGE_SURPLUS_MONTHS),
     ])
 
+    const currentMonth = YearMonth.parse(yearMonthOf(this.#now()))
     const breakdown = calculateBreakdown(accounts, lendings, wishes)
     const total = netAsset(breakdown)
     const avgSurplus = averageSurplus(balances, AVERAGE_SURPLUS_MONTHS)
@@ -82,6 +94,12 @@ export class DashboardUsecase {
         shortfall,
         // 平均が出せないなら到達見込みも出せない。
         monthsToReach: avgSurplus === null ? null : monthsToReach(shortfall, avgSurplus),
+        // こちらは平均余剰に依存しない。期限があれば必ず出せる。
+        monthlySavingNeeded: monthlySavingNeeded(
+          shortfall,
+          wish.deadline === null ? null : YearMonth.parse(yearMonthOf(wish.deadline)),
+          currentMonth,
+        ),
       })
     }
 

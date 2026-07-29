@@ -58,6 +58,25 @@ describe('YearMonth.addMonths', () => {
   })
 })
 
+describe('YearMonth.monthsUntil', () => {
+  it('先の月までの数を返す', () => {
+    expect(YearMonth.of(2026, 7).monthsUntil(YearMonth.of(2026, 10))).toBe(3)
+  })
+
+  it('同じ月なら0', () => {
+    expect(YearMonth.of(2026, 7).monthsUntil(YearMonth.of(2026, 7))).toBe(0)
+  })
+
+  it('過去なら負', () => {
+    expect(YearMonth.of(2026, 7).monthsUntil(YearMonth.of(2026, 6))).toBe(-1)
+  })
+
+  it('年をまたいでも数えられる', () => {
+    expect(YearMonth.of(2026, 11).monthsUntil(YearMonth.of(2027, 2))).toBe(3)
+    expect(YearMonth.of(2027, 2).monthsUntil(YearMonth.of(2026, 11))).toBe(-3)
+  })
+})
+
 describe('YearMonth.compare', () => {
   const july = YearMonth.of(2026, 7)
   const august = YearMonth.of(2026, 8)

@@ -44,6 +44,7 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
           ...w,
           shortfall: 358000,
           monthsToReach: 6,
+        monthlySavingNeeded: null,
         })),
       },
     }),

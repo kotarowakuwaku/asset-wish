@@ -41,20 +41,16 @@ describe('実質資産', () => {
     expect(screen.getByText('¥80,000')).toBeInTheDocument()
   })
 
-  // 投資は実質資産に含めない別枠の参考値（不変条件1）。
-  // 同じ並びに混ぜて出すと、合計に入っていると誤解される。
-  it('投資は別枠で、含めていないと明記する', async () => {
+  // 投資は実質資産に含めないため（不変条件1）、そもそも見たい値ではなかった。
+  // API は返し続けるが、画面には出さない。
+  it('投資資産は表示しない', async () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByText('¥350,000')).toBeInTheDocument()
+      expect(screen.getByText('¥842,000')).toBeInTheDocument()
     })
-    expect(
-      screen.getByRole('heading', { name: '投資資産（参考）' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('実質資産には含めていません。'),
-    ).toBeInTheDocument()
+    expect(screen.queryByText('¥350,000')).not.toBeInTheDocument()
+    expect(screen.queryByText(/投資/)).not.toBeInTheDocument()
   })
 })
 
@@ -106,6 +102,7 @@ describe('ウィッシュ', () => {
               deadline: null,
               shortfall: 358000,
               monthsToReach: 6,
+              monthlySavingNeeded: null,
             },
           ],
         })}
@@ -136,6 +133,7 @@ describe('ウィッシュ', () => {
               deadline: null,
               shortfall: -1000,
               monthsToReach: null,
+              monthlySavingNeeded: null,
             },
           ],
         })}
@@ -148,6 +146,68 @@ describe('ウィッシュ', () => {
     // 不足額が 0 以下ならすでに手が届いている。
     expect(screen.getByText('到達済み')).toBeInTheDocument()
     expect(screen.queryByText('あと0ヶ月')).not.toBeInTheDocument()
+  })
+
+  // 平均月間余剰に依存しないため、月次収支が未登録でもこちらは出せる。
+  it('期限があれば毎月いくら貯めればよいかを出す', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          hasAverageSurplus: false,
+          averageSurplus: 0,
+          wishes: [
+            {
+              id: '1',
+              title: 'カメラ',
+              amount: 1200000,
+              category: 'item',
+              status: 'considering',
+              priority: 0,
+              deadline: '2026-12-31',
+              shortfall: 358000,
+              monthsToReach: null,
+              monthlySavingNeeded: 59667,
+            },
+          ],
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('毎月¥59,667')).toBeInTheDocument()
+    })
+    expect(screen.getByText('算出不可')).toBeInTheDocument()
+  })
+
+  // 期限が無いものに「毎月—」と出すと、欄だけあって意味が無い。
+  it('期限が無ければ毎月いくらの行を出さない', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          wishes: [
+            {
+              id: '1',
+              title: 'カメラ',
+              amount: 1200000,
+              category: 'item',
+              status: 'considering',
+              priority: 0,
+              deadline: null,
+              shortfall: 358000,
+              monthsToReach: 6,
+              monthlySavingNeeded: null,
+            },
+          ],
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('カメラ')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('期限までに')).not.toBeInTheDocument()
   })
 
   it('1件も無ければその旨を出す', async () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { instantDiffMillis, parseInstant, parseIsoDate, toInstant, toIsoDate } from './time'
+import {
+  instantDiffMillis,
+  parseInstant,
+  parseIsoDate,
+  toInstant,
+  toIsoDate,
+  yearMonthOf,
+} from './time'
 
 describe('parseIsoDate', () => {
   it('YYYY-MM-DD を通す', () => {
@@ -48,6 +55,13 @@ describe('parseInstant / toInstant', () => {
 
   it('Date から作ると必ず UTC 表記になる', () => {
     expect(toInstant(new Date(0))).toBe('1970-01-01T00:00:00.000Z')
+  })
+})
+
+describe('yearMonthOf', () => {
+  it('日付からも時刻からも年月を取り出せる', () => {
+    expect(yearMonthOf(parseIsoDate('2026-07-12')!)).toBe('2026-07')
+    expect(yearMonthOf(toInstant(new Date('2026-07-12T15:30:00Z')))).toBe('2026-07')
   })
 })
 

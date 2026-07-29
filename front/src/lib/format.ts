@@ -47,6 +47,19 @@ export function formatShortfall(shortfall: number): string {
   return `あと${formatMoney(shortfall)}`
 }
 
+/**
+ * formatMonthlySaving は「毎月いくら貯めればよいか」を表示用にする。
+ *
+ * null は算出不可。期限が無い、期限が過ぎている、すでに手が届く、のいずれか。
+ * 0 円と書くと「貯めなくてよい」に見えるため、必ず区別する。
+ */
+export function formatMonthlySaving(amount: number | null): string {
+  if (amount === null) {
+    return '—'
+  }
+  return `毎月${formatMoney(amount)}`
+}
+
 const wishStatusLabels: Record<string, string> = {
   considering: '検討中',
   committed: '確定',
