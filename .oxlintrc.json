@@ -1,0 +1,65 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "import"],
+  "rules": {
+    "no-console": "error"
+  },
+  "overrides": [
+    {
+      // 500 の原因はログにしか残らない。クライアントには出さないため、
+      // ここだけ console を許す。
+      "files": ["worker/src/adapter/handler/errors.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    },
+    {
+      // 不変条件5：domain は外部依存ゼロ。
+      // Go では .golangci.yml の depguard が担っていた検査をここに移した
+      // （docs/migration-cloudflare.md 10章 #5）。
+      //
+      // ここに引っかかったら、ルールを緩めるのではなく設計を直す。
+      "files": ["worker/src/domain/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/adapter/**",
+                  "**/usecase/**",
+                  "**/infra/**",
+                  "hono",
+                  "hono/*",
+                  "cloudflare:*",
+                  "node:*"
+                ],
+                "message": "domain は外部依存ゼロ（不変条件5）。依存の向きは handler → usecase → domain。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      // 不変条件9：依存の向きは handler → usecase → domain。
+      // usecase は永続化の手段を知らない。リポジトリのインターフェースを
+      // 自分で持ち、実装は adapter が与える。
+      "files": ["worker/src/usecase/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/adapter/**", "**/infra/**", "hono", "hono/*"],
+                "message": "usecase は adapter を知らない（不変条件9）。必要な操作はポートとして port.ts に定義する。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

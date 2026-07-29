@@ -44,3 +44,11 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# --- Cloudflare Workers ---
+# wrangler が生成する型定義。npm run typecheck の前に毎回作り直すため
+# コミットしない（古いまま残ると、型は通るのに実行時に壊れる）
+/worker-configuration.d.ts
+.wrangler/
+# ローカルの secret。実トークンが入る
+.dev.vars

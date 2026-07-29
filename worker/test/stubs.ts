@@ -1,0 +1,145 @@
+// handler のテストで使うスタブ。
+//
+// 決め打ちの値を返すか、指定したエラーを投げるだけ。見たいのは HTTP の
+// 関心事——ステータスコード、JSON の形、エラーの対応づけ——であって、
+// 手順の正しさは usecase のテストが持つ。
+
+import type { Deps } from '../src/adapter/handler/services'
+import { Account } from '../src/domain/account'
+import { Lending } from '../src/domain/lending'
+import { money } from '../src/domain/money'
+import { MonthlyBalance } from '../src/domain/monthlyBalance'
+import { Transaction } from '../src/domain/transaction'
+import { Wish } from '../src/domain/wish'
+import { YearMonth } from '../src/domain/yearMonth'
+import type { Dashboard } from '../src/usecase/dashboard'
+import { isoDateOf, SOME_DATE, SOME_INSTANT, yen } from './support'
+
+export const TEST_TOKEN = 'test-token-that-is-long-enough-32'
+export const TEST_ID = '00000000-0000-4000-8000-000000000001'
+export const OTHER_ID = '00000000-0000-4000-8000-000000000002'
+export const NOW = SOME_INSTANT
+
+export function anAccount(overrides: { balance?: number; kind?: 'cash' | 'investment' } = {}): Account {
+  return Account.create(
+    TEST_ID,
+    'テスト口座',
+    overrides.kind ?? 'cash',
+    yen(overrides.balance ?? 500_000),
+    SOME_INSTANT,
+  )
+}
+
+export function aLending(overrides: { amount?: number; collected?: number } = {}): Lending {
+  return Lending.restore(
+    TEST_ID,
+    'テスト相手',
+    'メモ',
+    yen(overrides.amount ?? 12_000),
+    yen(overrides.collected ?? 5_000),
+    SOME_DATE,
+  )
+}
+
+export function aWish(overrides: { status?: string; deadline?: string | null } = {}): Wish {
+  return Wish.restore(TEST_ID, {
+    title: 'テスト',
+    amount: money(80_000),
+    category: 'item',
+    status: overrides.status ?? 'considering',
+    priority: 3,
+    deadline: overrides.deadline == null ? null : isoDateOf(overrides.deadline),
+  })
+}
+
+export function aMonthlyBalance(): MonthlyBalance {
+  return MonthlyBalance.create(TEST_ID, YearMonth.of(2026, 7), yen(300_000), yen(230_000))
+}
+
+export function aTransaction(): Transaction {
+  return Transaction.create(TEST_ID, OTHER_ID, yen(-12_000), 'lending_created', OTHER_ID, SOME_DATE)
+}
+
+export function aDashboard(): Dashboard {
+  return {
+    breakdown: { cashTotal: yen(910_000), outstandingLendings: yen(12_000), commitments: yen(80_000) },
+    netAsset: yen(842_000),
+    investmentTotal: yen(350_000),
+    averageSurplus: yen(60_000),
+    wishes: [{ wish: aWish(), shortfall: yen(358_000), monthsToReach: 6 }],
+  }
+}
+
+/** 呼ばれた引数を記録する。handler が何を渡したかの検証に使う。 */
+export type Calls = Record<string, unknown[]>
+
+/**
+ * すべての経路が通るスタブ一式。
+ *
+ * overrides で個別のメソッドを差し替える。エラーの対応づけを見るときは
+ * 投げるだけのメソッドを渡す。
+ */
+export function stubDeps(overrides: Partial<Deps> = {}): Deps & { calls: Calls } {
+  const calls: Calls = {}
+  const record =
+    <T>(name: string, result: () => T) =>
+    (...args: unknown[]): Promise<T> => {
+      calls[name] = args
+      return Promise.resolve(result())
+    }
+
+  const base: Deps = {
+    accounts: {
+      list: record('accounts.list', () => [anAccount()]),
+      create: record('accounts.create', () => anAccount()),
+      update: record('accounts.update', () => anAccount()),
+      delete: record('accounts.delete', () => undefined),
+    },
+    lendings: {
+      list: record('lendings.list', () => [aLending()]),
+      create: record('lendings.create', () => aLending()),
+      collect: record('lendings.collect', () => aLending()),
+      delete: record('lendings.delete', () => undefined),
+    },
+    wishes: {
+      list: record('wishes.list', () => [aWish()]),
+      create: record('wishes.create', () => aWish()),
+      updateContent: record('wishes.updateContent', () => aWish()),
+      commit: record('wishes.commit', () => aWish({ status: 'committed' })),
+      pay: record('wishes.pay', () => aWish({ status: 'done' })),
+      drop: record('wishes.drop', () => aWish({ status: 'dropped' })),
+      delete: record('wishes.delete', () => undefined),
+    },
+    balances: {
+      list: record('balances.list', () => [aMonthlyBalance()]),
+      upsert: record('balances.upsert', () => aMonthlyBalance()),
+    },
+    transactions: {
+      list: record('transactions.list', () => [aTransaction()]),
+    },
+    dashboard: {
+      get: record('dashboard.get', () => aDashboard()),
+    },
+    now: () => NOW,
+    authToken: TEST_TOKEN,
+  }
+
+  return { ...base, ...overrides, calls }
+}
+
+/** 認証つきのリクエストを組み立てる。 */
+export function authed(init: RequestInit = {}): RequestInit {
+  return {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${TEST_TOKEN}`,
+      ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  }
+}
+
+/** JSON 本文つきの POST / PATCH / PUT を組み立てる。 */
+export function jsonRequest(method: string, body: unknown): RequestInit {
+  return authed({ method, body: JSON.stringify(body) })
+}
