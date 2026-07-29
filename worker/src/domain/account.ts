@@ -14,19 +14,38 @@ export function isAccountKind(v: string): v is AccountKind {
   return (ACCOUNT_KINDS as readonly string[]).includes(v)
 }
 
+/**
+ * 口座。
+ *
+ * 書き換わる値は #private にしてメソッド経由に限定している。
+ * balance を直接代入できると updatedAt が古いまま残り、isStale による
+ * 残高更新の催促が効かなくなる。kind は生成後に変えられない（不変条件1）。
+ */
 export class Account {
   readonly id: string
-  name: string
   readonly kind: AccountKind
-  balance: Money
-  updatedAt: Instant
+  #name: string
+  #balance: Money
+  #updatedAt: Instant
 
   private constructor(id: string, name: string, kind: AccountKind, balance: Money, updatedAt: Instant) {
     this.id = id
-    this.name = name
     this.kind = kind
-    this.balance = balance
-    this.updatedAt = updatedAt
+    this.#name = name
+    this.#balance = balance
+    this.#updatedAt = updatedAt
+  }
+
+  get name(): string {
+    return this.#name
+  }
+
+  get balance(): Money {
+    return this.#balance
+  }
+
+  get updatedAt(): Instant {
+    return this.#updatedAt
   }
 
   /**
@@ -64,23 +83,23 @@ export class Account {
    */
   rename(name: string): void {
     if (name.trim() === '') throw domainError('EMPTY_TITLE')
-    this.name = name
+    this.#name = name
   }
 
   /** 残高を更新し、更新日時を now にする。 */
   updateBalance(balance: Money, now: Instant): void {
-    this.balance = balance
-    this.updatedAt = now
+    this.#balance = balance
+    this.#updatedAt = now
   }
 
   /** 残高を増減させる。立替の発生・回収、ウィッシュの支払いで用いる。 */
   applyDelta(delta: Money, now: Instant): void {
-    this.balance = addMoney(this.balance, delta)
-    this.updatedAt = now
+    this.#balance = addMoney(this.#balance, delta)
+    this.#updatedAt = now
   }
 
   /** 最終更新から thresholdMillis 以上経過しているか。残高更新の催促表示に用いる。 */
   isStale(now: Instant, thresholdMillis: number): boolean {
-    return instantDiffMillis(now, this.updatedAt) >= thresholdMillis
+    return instantDiffMillis(now, this.#updatedAt) >= thresholdMillis
   }
 }

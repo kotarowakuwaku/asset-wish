@@ -1,17 +1,32 @@
 import { domainError } from './errors'
-import { addMoney, isPositiveMoney, isZeroMoney, subMoney, ZERO_MONEY, type Money } from './money'
+import {
+  addMoney,
+  isNegativeMoney,
+  isPositiveMoney,
+  isZeroMoney,
+  subMoney,
+  ZERO_MONEY,
+  type Money,
+} from './money'
 import type { IsoDate } from './time'
 
 /** 回収状態。DB には保存せず、金額から導出する（不変条件12）。 */
 export type CollectionStatus = 'uncollected' | 'partial' | 'collected'
 
+/**
+ * 立替。
+ *
+ * collectedAmount は #private にして collect() 経由に限定している。
+ * 直接代入できると、過回収を拒否する検査（不変条件4）を型検査ごと迂回できる。
+ * amount が readonly なのは、書き換わると未回収残高の意味が変わるため。
+ */
 export class Lending {
   readonly id: string
   readonly counterparty: string
   readonly description: string
   readonly amount: Money
-  collectedAmount: Money
   readonly occurredOn: IsoDate
+  #collectedAmount: Money
 
   private constructor(
     id: string,
@@ -25,8 +40,12 @@ export class Lending {
     this.counterparty = counterparty
     this.description = description
     this.amount = amount
-    this.collectedAmount = collectedAmount
     this.occurredOn = occurredOn
+    this.#collectedAmount = collectedAmount
+  }
+
+  get collectedAmount(): Money {
+    return this.#collectedAmount
   }
 
   /**
@@ -47,7 +66,7 @@ export class Lending {
 
   /**
    * DB から復元する。
-   * 過回収の行は CHECK 制約で入らないが、すり抜けた場合はここで止める。
+   * 過回収・負の回収額の行は CHECK 制約で入らないが、すり抜けた場合はここで止める。
    */
   static restore(
     id: string,
@@ -58,15 +77,14 @@ export class Lending {
     occurredOn: IsoDate,
   ): Lending {
     if (!isPositiveMoney(amount)) throw domainError('INVALID_AMOUNT')
-    if (collectedAmount < 0 || collectedAmount > amount) {
-      throw domainError('COLLECT_EXCEEDS_OUTSTANDING')
-    }
+    if (isNegativeMoney(collectedAmount)) throw domainError('NEGATIVE_AMOUNT')
+    if (collectedAmount > amount) throw domainError('COLLECT_EXCEEDS_OUTSTANDING')
     return new Lending(id, counterparty, description, amount, collectedAmount, occurredOn)
   }
 
   /** 未回収残高。実質資産への加算対象（不変条件4）。 */
   outstanding(): Money {
-    return subMoney(this.amount, this.collectedAmount)
+    return subMoney(this.amount, this.#collectedAmount)
   }
 
   isFullyCollected(): boolean {
@@ -75,8 +93,8 @@ export class Lending {
 
   /** 回収状態を導出する。 */
   status(): CollectionStatus {
-    if (isZeroMoney(this.collectedAmount)) return 'uncollected'
-    if (this.collectedAmount < this.amount) return 'partial'
+    if (isZeroMoney(this.#collectedAmount)) return 'uncollected'
+    if (this.#collectedAmount < this.amount) return 'partial'
     return 'collected'
   }
 
@@ -84,6 +102,6 @@ export class Lending {
   collect(amount: Money): void {
     if (!isPositiveMoney(amount)) throw domainError('INVALID_AMOUNT')
     if (amount > this.outstanding()) throw domainError('COLLECT_EXCEEDS_OUTSTANDING')
-    this.collectedAmount = addMoney(this.collectedAmount, amount)
+    this.#collectedAmount = addMoney(this.#collectedAmount, amount)
   }
 }

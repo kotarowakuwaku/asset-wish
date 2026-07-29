@@ -86,6 +86,13 @@ describe('Wish', () => {
   })
 
   it('不正な状態は復元できない（CHECK 制約をすり抜けた場合の最後の関門）', () => {
-    expectDomainError(() => Wish.restore(id(), content, 'paid'), 'INVALID_WISH_STATUS')
+    expectDomainError(() => Wish.restore(id(), { ...content, status: 'paid' }), 'INVALID_WISH_STATUS')
+  })
+
+  it('不正な種別も復元できない', () => {
+    expectDomainError(
+      () => Wish.restore(id(), { ...content, category: 'trip', status: 'considering' }),
+      'INVALID_WISH_CATEGORY',
+    )
   })
 })

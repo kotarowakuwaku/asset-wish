@@ -30,26 +30,69 @@ export type WishContent = {
   deadline: IsoDate | null
 }
 
-export class Wish {
-  readonly id: string
+/**
+ * DB に保存されている表現。
+ *
+ * category と status を未検証の文字列で受けるのは、CHECK 制約をすり抜けた値を
+ * ドメイン層に通さないため。呼び出し側にキャストさせると、検証の前に型で
+ * 嘘をつくことになる（Account.restore / Transaction.restore と同じ形）。
+ */
+export type StoredWish = {
   title: string
   amount: Money
-  category: WishCategory
+  category: string
+  status: string
   priority: number
   deadline: IsoDate | null
-  /** 状態を動かせるのは commit / pay / drop だけ（不変条件6）。 */
+}
+
+/**
+ * ウィッシュ。
+ *
+ * すべての値を #private にしてメソッド経由に限定している。直接代入できると、
+ * 0円やタイトル空のウィッシュが更新経由で入り込み、状態遷移の可否判定
+ *（不変条件6）も迂回できる。
+ */
+export class Wish {
+  readonly id: string
+  #title: string
+  #amount: Money
+  #category: WishCategory
+  #priority: number
+  #deadline: IsoDate | null
   #status: WishStatus
 
   private constructor(id: string, content: WishContent, status: WishStatus) {
     this.id = id
-    this.title = content.title
-    this.amount = content.amount
-    this.category = content.category
-    this.priority = content.priority
-    this.deadline = content.deadline
+    this.#title = content.title
+    this.#amount = content.amount
+    this.#category = content.category
+    this.#priority = content.priority
+    this.#deadline = content.deadline
     this.#status = status
   }
 
+  get title(): string {
+    return this.#title
+  }
+
+  get amount(): Money {
+    return this.#amount
+  }
+
+  get category(): WishCategory {
+    return this.#category
+  }
+
+  get priority(): number {
+    return this.#priority
+  }
+
+  get deadline(): IsoDate | null {
+    return this.#deadline
+  }
+
+  /** 状態を動かせるのは commit / pay / drop だけ（不変条件6）。 */
   get status(): WishStatus {
     return this.#status
   }
@@ -63,11 +106,21 @@ export class Wish {
     return new Wish(id, content, 'considering')
   }
 
-  /** DB から復元する。status は CHECK 制約をすり抜けた値を通さないため検証する。 */
-  static restore(id: string, content: WishContent, status: string): Wish {
-    if (!isWishStatus(status)) throw domainError('INVALID_WISH_STATUS')
-    if (!isWishCategory(content.category)) throw domainError('INVALID_WISH_CATEGORY')
-    return new Wish(id, content, status)
+  /** DB から復元する。category と status は CHECK 制約をすり抜けた値を通さないため検証する。 */
+  static restore(id: string, stored: StoredWish): Wish {
+    if (!isWishCategory(stored.category)) throw domainError('INVALID_WISH_CATEGORY')
+    if (!isWishStatus(stored.status)) throw domainError('INVALID_WISH_STATUS')
+    return new Wish(
+      id,
+      {
+        title: stored.title,
+        amount: stored.amount,
+        category: stored.category,
+        priority: stored.priority,
+        deadline: stored.deadline,
+      },
+      stored.status,
+    )
   }
 
   /**
@@ -78,11 +131,11 @@ export class Wish {
    */
   updateContent(content: WishContent): void {
     validateContent(content)
-    this.title = content.title
-    this.amount = content.amount
-    this.category = content.category
-    this.priority = content.priority
-    this.deadline = content.deadline
+    this.#title = content.title
+    this.#amount = content.amount
+    this.#category = content.category
+    this.#priority = content.priority
+    this.#deadline = content.deadline
   }
 
   /**

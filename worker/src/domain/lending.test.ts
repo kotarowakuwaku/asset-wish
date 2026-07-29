@@ -113,4 +113,11 @@ describe('Lending', () => {
       'COLLECT_EXCEEDS_OUTSTANDING',
     )
   })
+
+  it('回収額が負の行も復元できない', () => {
+    expectDomainError(
+      () => Lending.restore(id(), 'テスト相手', '', yen(12_000), yen(-1), SOME_DATE),
+      'NEGATIVE_AMOUNT',
+    )
+  })
 })

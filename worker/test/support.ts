@@ -41,11 +41,14 @@ export function lend(amount: number, collected: number): Lending {
 }
 
 export function wish(amount: number, status: WishStatus): Wish {
-  return Wish.restore(
-    id(),
-    { title: 'テスト', amount: yen(amount), category: 'item', priority: 0, deadline: null },
+  return Wish.restore(id(), {
+    title: 'テスト',
+    amount: yen(amount),
+    category: 'item',
     status,
-  )
+    priority: 0,
+    deadline: null,
+  })
 }
 
 export function mb(year: number, month: number, income: number, expense: number): MonthlyBalance {

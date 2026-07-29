@@ -2,11 +2,17 @@ import { domainError } from './errors'
 import { isNegativeMoney, isPositiveMoney, subMoney, type Money } from './money'
 import type { YearMonth } from './yearMonth'
 
+/**
+ * 月次収支。
+ *
+ * すべて readonly。金額を書き換える操作は API に無く、更新は
+ * 同じ年月で作り直す（upsert）形になる。
+ */
 export class MonthlyBalance {
   readonly id: string
   readonly yearMonth: YearMonth
-  income: Money
-  expense: Money
+  readonly income: Money
+  readonly expense: Money
 
   private constructor(id: string, yearMonth: YearMonth, income: Money, expense: Money) {
     this.id = id
