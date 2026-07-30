@@ -5,7 +5,7 @@
 // 依存の向きを handler → usecase → domain に保つ（不変条件9）。
 
 import type { Account } from '../domain/account'
-import type { Lending } from '../domain/lending'
+import type { Loan } from '../domain/loan'
 import type { Money } from '../domain/money'
 import type { MonthlyBalance } from '../domain/monthlyBalance'
 import { toInstant, type Instant } from '../domain/time'
@@ -85,10 +85,10 @@ export interface AccountRepository {
   delete(id: string): Promise<void>
 }
 
-export interface LendingRepository {
-  /** outstandingOnly が true なら未回収（回収額 < 立替額）のみ返す。 */
-  list(outstandingOnly: boolean): Promise<Lending[]>
-  get(id: string): Promise<Lending>
+export interface LoanRepository {
+  /** outstandingOnly が true なら未精算（精算額 < 貸し借り額）のみ返す。 */
+  list(outstandingOnly: boolean): Promise<Loan[]>
+  get(id: string): Promise<Loan>
   delete(id: string): Promise<void>
 }
 
@@ -136,8 +136,8 @@ export interface TransactionRepository {
  * 楽観ロックの実現方法は adapter が持つ。
  */
 export type WriteOperation =
-  | { kind: 'createLending'; lending: Lending }
-  | { kind: 'updateLendingCollected'; lending: Lending; expectedCollectedAmount: Money }
+  | { kind: 'createLoan'; loan: Loan }
+  | { kind: 'updateLoanSettled'; loan: Loan; expectedSettledAmount: Money }
   | { kind: 'updateWishStatus'; wish: Wish; expectedStatus: WishStatus }
   | { kind: 'updateAccount'; account: Account; expectedBalance: Money }
   | { kind: 'createTransaction'; transaction: Transaction }

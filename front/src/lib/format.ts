@@ -81,14 +81,25 @@ export function wishCategoryLabel(category: string): string {
   return wishCategoryLabels[category] ?? category
 }
 
-const collectionStatusLabels: Record<string, string> = {
-  uncollected: '未回収',
-  partial: '一部回収',
-  collected: '回収済み',
+const settlementStatusLabels: Record<string, string> = {
+  unsettled: '未精算',
+  partial: '一部精算',
+  settled: '精算済み',
 }
 
-export function collectionStatusLabel(status: string): string {
-  return collectionStatusLabels[status] ?? status
+export function settlementStatusLabel(status: string): string {
+  return settlementStatusLabels[status] ?? status
+}
+
+// 向きは金額の符号に表れない（どちらも正）。画面ではこのラベルだけが
+// 貸したのか借りたのかを伝える。
+const loanDirectionLabels: Record<string, string> = {
+  lent: '貸した',
+  borrowed: '借りた',
+}
+
+export function loanDirectionLabel(direction: string): string {
+  return loanDirectionLabels[direction] ?? direction
 }
 
 const accountKindLabels: Record<string, string> = {
@@ -101,8 +112,10 @@ export function accountKindLabel(kind: string): string {
 }
 
 const transactionKindLabels: Record<string, string> = {
-  lending_created: '立替の発生',
-  lending_collected: '立替の回収',
+  // 貸し借りの2種はもう新しく作られない。貸し借りは口座残高を動かさなくなったため
+  // （不変条件4）。2026-07-30 より前の履歴を表示するために残してある。
+  lending_created: '貸し借りの発生',
+  lending_collected: '貸し借りの精算',
   wish_paid: 'ウィッシュの支払い',
   adjustment: '残高の調整',
 }

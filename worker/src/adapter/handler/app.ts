@@ -6,13 +6,14 @@
 
 import { Hono } from 'hono'
 import type { AccountKind } from '../../domain/account'
+import type { LoanDirection } from '../../domain/loan'
 import { isWishStatus, type WishCategory } from '../../domain/wish'
 import { YearMonth } from '../../domain/yearMonth'
 import { badRequest, toErrorResponse } from './errors'
 import {
   accountResponse,
   dashboardResponse,
-  lendingResponse,
+  loanResponse,
   monthlyBalanceResponse,
   transactionResponse,
   wishResponse,
@@ -120,41 +121,57 @@ export function createApp(deps: Deps) {
     return c.body(null, 204)
   })
 
-  // ---- 立替 ----
+  // ---- 貸し借り ----
 
-  app.get('/api/lendings', async (c) => {
-    // ?outstanding=true で未回収のみ。それ以外の値は全件として扱う。
-    const lendings = await deps.lendings.list(c.req.query('outstanding') === 'true')
-    return c.json(lendings.map(lendingResponse))
+  app.get('/api/loans', async (c) => {
+    // ?outstanding=true で未精算のみ。それ以外の値は全件として扱う。
+    const loans = await deps.loans.list(c.req.query('outstanding') === 'true')
+    return c.json(loans.map(loanResponse))
   })
 
-  app.post('/api/lendings', async (c) => {
-    const body = await readBody(c, ['counterparty', 'description', 'amount', 'occurredOn', 'accountId'])
-    const l = await deps.lendings.create(
+  // accountId を受け取らない。貸し借りは口座残高を動かさない（不変条件4）。
+  // 未知の項目は 400 になるので、accountId を送れば 400 で返る。黙って
+  // 無視すると「口座を指定したのに残高が変わらない」と読める。
+  app.post('/api/loans', async (c) => {
+    const body = await readBody(c, [
+      'direction',
+      'counterparty',
+      'description',
+      'amount',
+      'occurredOn',
+    ])
+    const l = await deps.loans.create(
+      // direction の妥当性は domain が判定する（不正なら 422）。
+      // ここで弾くと、同じ判断が2箇所に散る。
+      readString(body, 'direction', '') as LoanDirection,
       readString(body, 'counterparty', ''),
       readString(body, 'description', ''),
       readMoney(body, 'amount', 0),
       readDate(body, 'occurredOn'),
-      readUuid(body, 'accountId'),
     )
-    return c.json(lendingResponse(l), 201)
+    return c.json(loanResponse(l), 201)
   })
 
-  // 未回収残高を超える額は 422（COLLECT_EXCEEDS_OUTSTANDING）になる。
-  app.post('/api/lendings/:id/collect', async (c) => {
+  /**
+   * 精算を記録する。貸した側では回収、借りた側では返済にあたる。
+   *
+   * **向きごとに経路を分けない。** domain の処理はどちらも「未精算残高が減る」
+   * だけで同じなので、分けると同じ手順が2本に増える。さらに「lent に /repay を
+   * 投げたら 422 か？」という判定が新たに必要になる。
+   *
+   * 未精算残高を超える額は 422（SETTLE_EXCEEDS_OUTSTANDING）になる。
+   * occurredOn は受け取らない。口座を触らないので取引履歴が作られず、
+   * 精算日を残す先が無い。
+   */
+  app.post('/api/loans/:id/settle', async (c) => {
     const id = parseUuid(c.req.param('id'), 'id')
-    const body = await readBody(c, ['amount', 'occurredOn', 'accountId'])
-    const l = await deps.lendings.collect(
-      id,
-      readMoney(body, 'amount', 0),
-      readDate(body, 'occurredOn'),
-      readUuid(body, 'accountId'),
-    )
-    return c.json(lendingResponse(l))
+    const body = await readBody(c, ['amount'])
+    const l = await deps.loans.settle(id, readMoney(body, 'amount', 0))
+    return c.json(loanResponse(l))
   })
 
-  app.delete('/api/lendings/:id', async (c) => {
-    await deps.lendings.delete(parseUuid(c.req.param('id'), 'id'))
+  app.delete('/api/loans/:id', async (c) => {
+    await deps.loans.delete(parseUuid(c.req.param('id'), 'id'))
     return c.body(null, 204)
   })
 

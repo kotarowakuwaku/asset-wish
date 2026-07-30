@@ -4,11 +4,13 @@ import {
   averageSurplus,
   calculateBreakdown,
   calculateInvestmentTotal,
+  calculateOutstandingLoans,
   calculateShortfall,
   monthlySavingNeeded,
   monthsToReach,
   netAsset,
   type NetAssetBreakdown,
+  type OutstandingLoans,
 } from '../domain/netAsset'
 import { yearMonthOf } from '../domain/time'
 import { isTerminalWishStatus, type Wish } from '../domain/wish'
@@ -16,7 +18,7 @@ import { YearMonth } from '../domain/yearMonth'
 import type {
   AccountRepository,
   Clock,
-  LendingRepository,
+  LoanRepository,
   MonthlyBalanceRepository,
   WishRepository,
 } from './port'
@@ -35,7 +37,13 @@ export type DashboardWish = {
 export type Dashboard = {
   breakdown: NetAssetBreakdown
   netAsset: Money
+  /** 実質資産の外の参考値（不変条件1）。 */
   investmentTotal: Money
+  /**
+   * 未精算の貸し借りを向きごとに分けた合計。**実質資産の外の参考値**（不変条件4）。
+   * breakdown ではなくここに置いてあるのは、合計に足されない値だから。
+   */
+  outstanding: OutstandingLoans
   /** データが無ければ null（算出不可）。 */
   averageSurplus: Money | null
   wishes: DashboardWish[]
@@ -43,7 +51,7 @@ export type Dashboard = {
 
 export class DashboardUsecase {
   readonly #accounts: AccountRepository
-  readonly #lendings: LendingRepository
+  readonly #loans: LoanRepository
   readonly #wishes: WishRepository
   readonly #balances: MonthlyBalanceRepository
   // 「期限まであと何ヶ月あるか」を出すのに現在の年月が要る。実時刻を直に
@@ -52,13 +60,13 @@ export class DashboardUsecase {
 
   constructor(
     accounts: AccountRepository,
-    lendings: LendingRepository,
+    loans: LoanRepository,
     wishes: WishRepository,
     balances: MonthlyBalanceRepository,
     now: Clock,
   ) {
     this.#accounts = accounts
-    this.#lendings = lendings
+    this.#loans = loans
     this.#wishes = wishes
     this.#balances = balances
     this.#now = now
@@ -70,16 +78,16 @@ export class DashboardUsecase {
    * 計算は必ず domain の関数を呼ぶ。ここで式を再実装しない（不変条件8）。
    */
   async get(): Promise<Dashboard> {
-    const [accounts, lendings, wishes, balances] = await Promise.all([
+    const [accounts, loans, wishes, balances] = await Promise.all([
       this.#accounts.list(),
-      // 未回収のみ。回収済みの立替は実質資産に足さない。
-      this.#lendings.list(true),
+      // 未精算のみ。精算済みの貸し借りは返ってくる予定の額に含めない。
+      this.#loans.list(true),
       this.#wishes.list(null),
       this.#balances.listRecent(AVERAGE_SURPLUS_MONTHS),
     ])
 
     const currentMonth = YearMonth.parse(yearMonthOf(this.#now()))
-    const breakdown = calculateBreakdown(accounts, lendings, wishes)
+    const breakdown = calculateBreakdown(accounts, wishes)
     const total = netAsset(breakdown)
     const avgSurplus = averageSurplus(balances, AVERAGE_SURPLUS_MONTHS)
 
@@ -107,6 +115,7 @@ export class DashboardUsecase {
       breakdown,
       netAsset: total,
       investmentTotal: calculateInvestmentTotal(accounts),
+      outstanding: calculateOutstandingLoans(loans),
       averageSurplus: avgSurplus,
       wishes: dashboardWishes,
     }

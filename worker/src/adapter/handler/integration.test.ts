@@ -22,12 +22,20 @@ async function req<T>(path: string, init: RequestInit = authed()): Promise<{ sta
 }
 
 type AccountBody = { id: string; balance: number; kind: string }
-type LendingBody = { id: string; outstanding: number; status: string; collectedAmount: number }
+type LoanBody = {
+  id: string
+  direction: string
+  outstanding: number
+  status: string
+  settledAmount: number
+}
 type WishBody = { id: string; status: string }
 type DashboardBody = {
   netAsset: number
   investmentTotal: number
-  breakdown: { cashTotal: number; outstandingLendings: number; commitments: number }
+  outstandingLent: number
+  outstandingBorrowed: number
+  breakdown: { cashTotal: number; commitments: number }
   averageSurplus: number
   hasAverageSurplus: boolean
   wishes: { id: string; shortfall: number; monthsToReach: number | null }[]
@@ -42,101 +50,128 @@ async function createAccount(balance: number, kind = 'cash'): Promise<AccountBod
   return body
 }
 
-describe('立替の一連の流れ', () => {
-  it('登録すると残高が減り、履歴が残る', async () => {
-    const account = await createAccount(500_000)
-
-    const created = await req<LendingBody>(
-      '/api/lendings',
+describe('貸し借りの一連の流れ', () => {
+  async function createLoan(
+    amount: number,
+    counterparty = 'テスト相手',
+    direction = 'lent',
+  ): Promise<LoanBody> {
+    const { status, body } = await req<LoanBody>(
+      '/api/loans',
       jsonRequest('POST', {
-        counterparty: 'テスト相手',
+        direction,
+        counterparty,
         description: '',
-        amount: 12_000,
+        amount,
         occurredOn: '2026-07-12',
-        accountId: account.id,
       }),
     )
-    expect(created.status).toBe(201)
-    expect(created.body.outstanding).toBe(12_000)
+    expect(status).toBe(201)
+    return body
+  }
 
-    const accounts = await req<AccountBody[]>('/api/accounts')
-    expect(accounts.body[0].balance).toBe(488_000)
+  // 不変条件4。立て替えた時点で現金が出たとは限らない（カード払い）。
+  it.each(['lent', 'borrowed'])(
+    '登録しても残高は動かず、履歴も残らない（%s）',
+    async (direction) => {
+      await createAccount(500_000)
 
-    const transactions = await req<{ kind: string; amount: number }[]>('/api/transactions')
-    expect(transactions.body).toHaveLength(1)
-    expect(transactions.body[0]).toMatchObject({ kind: 'lending_created', amount: -12_000 })
+      const created = await createLoan(12_000, 'テスト相手', direction)
+      expect(created.direction).toBe(direction)
+      // 借りた側も金額は正で持つ。
+      expect(created.outstanding).toBe(12_000)
+
+      const accounts = await req<AccountBody[]>('/api/accounts')
+      expect(accounts.body[0].balance).toBe(500_000)
+
+      const transactions = await req<unknown[]>('/api/transactions')
+      expect(transactions.body).toHaveLength(0)
+    },
+  )
+
+  // 向きが変わっても経路は1本。処理も同じ（未精算残高が減るだけ）。
+  it('借りた分も同じ /settle で精算できる', async () => {
+    const loan = await createLoan(5_000, 'テスト相手', 'borrowed')
+
+    const settled = await req<LoanBody>(
+      `/api/loans/${loan.id}/settle`,
+      jsonRequest('POST', { amount: 2_000 }),
+    )
+
+    expect(settled.status).toBe(200)
+    expect(settled.body.direction).toBe('borrowed')
+    expect(settled.body.outstanding).toBe(3_000)
   })
 
-  it('回収すると残高が戻り、未回収残高が減る', async () => {
-    const account = await createAccount(500_000)
-    const lending = await req<LendingBody>(
-      '/api/lendings',
+  // 向きは domain が判定するので 422（業務ルール違反）。400 ではない。
+  it('向きが不正なら 422', async () => {
+    const res = await req<{ error: { code: string } }>(
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'sideways',
         counterparty: 'テスト相手',
-        amount: 12_000,
+        amount: 1_000,
         occurredOn: '2026-07-12',
-        accountId: account.id,
       }),
     )
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('INVALID_LOAN_DIRECTION')
+  })
 
-    const collected = await req<LendingBody>(
-      `/api/lendings/${lending.body.id}/collect`,
-      jsonRequest('POST', { amount: 5_000, occurredOn: '2026-07-20', accountId: account.id }),
+  it('精算すると未精算残高が減る。残高は動かない', async () => {
+    await createAccount(500_000)
+    const loan = await createLoan(12_000)
+
+    const settled = await req<LoanBody>(
+      `/api/loans/${loan.id}/settle`,
+      jsonRequest('POST', { amount: 5_000 }),
     )
 
-    expect(collected.status).toBe(200)
-    expect(collected.body.outstanding).toBe(7_000)
-    expect(collected.body.status).toBe('partial')
+    expect(settled.status).toBe(200)
+    expect(settled.body.outstanding).toBe(7_000)
+    expect(settled.body.status).toBe('partial')
 
     const accounts = await req<AccountBody[]>('/api/accounts')
-    expect(accounts.body[0].balance).toBe(493_000)
+    expect(accounts.body[0].balance).toBe(500_000)
   })
 
   // 不変条件4。domain の判定と DB の CHECK 制約の両方が守っている。
-  it('未回収残高を超える回収は 422 で、何も動かない', async () => {
+  it('未精算残高を超える精算は 422 で、何も動かない', async () => {
+    const loan = await createLoan(12_000)
+
+    const over = await req<{ error: { code: string } }>(
+      `/api/loans/${loan.id}/settle`,
+      jsonRequest('POST', { amount: 12_001 }),
+    )
+
+    expect(over.status).toBe(422)
+    expect(over.body.error.code).toBe('SETTLE_EXCEEDS_OUTSTANDING')
+    expect((await req<LoanBody[]>('/api/loans')).body[0].settledAmount).toBe(0)
+  })
+
+  it('未精算だけに絞り込める', async () => {
+    const l = await createLoan(1_000, '完済予定')
+    await req(`/api/loans/${l.id}/settle`, jsonRequest('POST', { amount: 1_000 }))
+
+    expect((await req<LoanBody[]>('/api/loans')).body).toHaveLength(1)
+    expect((await req<LoanBody[]>('/api/loans?outstanding=true')).body).toHaveLength(0)
+  })
+
+  // 口座を指定させないことは API の形として保証する。黙って無視すると
+  // 「口座を選んだのに残高が変わらない」と読める。
+  it('accountId を送ると 400', async () => {
     const account = await createAccount(500_000)
-    const lending = await req<LendingBody>(
-      '/api/lendings',
+    const res = await req<{ error: { code: string } }>(
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026-07-12',
         accountId: account.id,
       }),
     )
-
-    const over = await req<{ error: { code: string } }>(
-      `/api/lendings/${lending.body.id}/collect`,
-      jsonRequest('POST', { amount: 12_001, occurredOn: '2026-07-20', accountId: account.id }),
-    )
-
-    expect(over.status).toBe(422)
-    expect(over.body.error.code).toBe('COLLECT_EXCEEDS_OUTSTANDING')
-
-    const accounts = await req<AccountBody[]>('/api/accounts')
-    expect(accounts.body[0].balance).toBe(488_000)
-    const transactions = await req<unknown[]>('/api/transactions')
-    expect(transactions.body).toHaveLength(1)
-  })
-
-  it('未回収だけに絞り込める', async () => {
-    const account = await createAccount(500_000)
-    const l = await req<LendingBody>(
-      '/api/lendings',
-      jsonRequest('POST', {
-        counterparty: '完済予定',
-        amount: 1_000,
-        occurredOn: '2026-07-12',
-        accountId: account.id,
-      }),
-    )
-    await req(
-      `/api/lendings/${l.body.id}/collect`,
-      jsonRequest('POST', { amount: 1_000, occurredOn: '2026-07-20', accountId: account.id }),
-    )
-
-    expect((await req<LendingBody[]>('/api/lendings')).body).toHaveLength(1)
-    expect((await req<LendingBody[]>('/api/lendings?outstanding=true')).body).toHaveLength(0)
+    expect(res.status).toBe(400)
   })
 })
 
@@ -213,21 +248,19 @@ describe('ウィッシュの一連の流れ', () => {
 
 describe('ダッシュボード', () => {
   // このアプリの存在理由そのもの。実質資産の式が API 越しに保たれているか。
-  it('現金 + 未回収立替 - 確定支出。投資は別枠', async () => {
-    const cash = await createAccount(910_000)
+  it('現金 - 確定支出。投資と貸し借りは別枠', async () => {
+    await createAccount(910_000)
     await createAccount(350_000, 'investment')
 
     await req(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026-07-12',
-        accountId: cash.id,
       }),
     )
-    // 立替の登録で現金が 12,000 減っている。残高を戻して 910,000 に揃える。
-    await req(`/api/accounts/${cash.id}`, jsonRequest('PATCH', { balance: 910_000 }))
 
     const wish = await req<WishBody>(
       '/api/wishes',
@@ -237,13 +270,11 @@ describe('ダッシュボード', () => {
 
     const { body } = await req<DashboardBody>('/api/dashboard')
 
-    expect(body.breakdown).toEqual({
-      cashTotal: 910_000,
-      outstandingLendings: 12_000,
-      commitments: 80_000,
-    })
-    expect(body.netAsset).toBe(842_000)
+    expect(body.breakdown).toEqual({ cashTotal: 910_000, commitments: 80_000 })
+    expect(body.netAsset).toBe(830_000)
+    // どちらも実質資産の外（不変条件1・4）。
     expect(body.investmentTotal).toBe(350_000)
+    expect(body.outstandingLent).toBe(12_000)
   })
 
   it('月次収支から平均余剰と到達見込みを出す', async () => {
@@ -291,16 +322,17 @@ describe('月次収支', () => {
 })
 
 describe('口座の削除', () => {
+  // 履歴を作るのはウィッシュの支払い。貸し借りはもう口座を触らない（不変条件4）。
   it('取引履歴が残っていれば 422', async () => {
     const account = await createAccount(500_000)
+    const wish = await req<WishBody>(
+      '/api/wishes',
+      jsonRequest('POST', { title: 'テスト', amount: 80_000, category: 'item' }),
+    )
+    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
     await req(
-      '/api/lendings',
-      jsonRequest('POST', {
-        counterparty: 'テスト相手',
-        amount: 12_000,
-        occurredOn: '2026-07-12',
-        accountId: account.id,
-      }),
+      `/api/wishes/${wish.body.id}/pay`,
+      jsonRequest('POST', { accountId: account.id, occurredOn: '2026-07-12' }),
     )
 
     const res = await req<{ error: { code: string } }>(
@@ -321,23 +353,26 @@ describe('口座の削除', () => {
 })
 
 describe('存在しない対象', () => {
-  it('無い立替の回収は 404', async () => {
-    const account = await createAccount(500_000)
+  it('無い貸し借りの精算は 404', async () => {
     const res = await req(
-      '/api/lendings/00000000-0000-4000-8000-00000000dead/collect',
-      jsonRequest('POST', { amount: 1, occurredOn: '2026-07-12', accountId: account.id }),
+      '/api/loans/00000000-0000-4000-8000-00000000dead/settle',
+      jsonRequest('POST', { amount: 1 }),
     )
     expect(res.status).toBe(404)
   })
 
-  it('無い口座への立替は 404', async () => {
+  it('無い口座へのウィッシュの支払いは 404', async () => {
+    const wish = await req<WishBody>(
+      '/api/wishes',
+      jsonRequest('POST', { title: 'テスト', amount: 1_000, category: 'item' }),
+    )
+    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
+
     const res = await req(
-      '/api/lendings',
+      `/api/wishes/${wish.body.id}/pay`,
       jsonRequest('POST', {
-        counterparty: 'テスト相手',
-        amount: 1_000,
-        occurredOn: '2026-07-12',
         accountId: '00000000-0000-4000-8000-00000000dead',
+        occurredOn: '2026-07-12',
       }),
     )
     expect(res.status).toBe(404)

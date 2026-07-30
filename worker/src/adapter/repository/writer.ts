@@ -1,6 +1,6 @@
 import { ConflictError, type AtomicWriter, type WriteOperation } from '../../usecase/port'
 import { updateAccountStatement } from './account'
-import { insertLendingStatement, updateLendingCollectedStatement } from './lending'
+import { insertLoanStatement, updateLoanSettledStatement } from './loan'
 import { insertTransactionStatement } from './transaction'
 import { updateWishStatusStatement } from './wish'
 
@@ -14,7 +14,7 @@ import { updateWishStatusStatement } from './wish'
  *
  * 素直に「条件付き UPDATE を並べて、更新0件なら競合とみなす」と書くと**壊れる。**
  * 実際に D1 で確かめたところ、条件に合わず0件だった UPDATE の後ろの INSERT は
- * そのまま実行される。立替だけが増えて残高が動かない、という中途半端な状態が残る。
+ * そのまま実行される。貸し借りだけが増えて残高が動かない、という中途半端な状態が残る。
  *
  * そこで、
  *
@@ -56,10 +56,10 @@ export class D1AtomicWriter implements AtomicWriter {
 
   #statement(op: WriteOperation, guarded: boolean): D1PreparedStatement {
     switch (op.kind) {
-      case 'createLending':
-        return insertLendingStatement(this.#db, op.lending, guarded)
-      case 'updateLendingCollected':
-        return updateLendingCollectedStatement(this.#db, op.lending, guarded)
+      case 'createLoan':
+        return insertLoanStatement(this.#db, op.loan, guarded)
+      case 'updateLoanSettled':
+        return updateLoanSettledStatement(this.#db, op.loan, guarded)
       case 'updateWishStatus':
         return updateWishStatusStatement(this.#db, op.wish, guarded)
       case 'updateAccount':
@@ -87,18 +87,18 @@ function preconditionOf(op: WriteOperation): Precondition[] {
   switch (op.kind) {
     case 'updateAccount':
       return [{ table: 'accounts', column: 'balance', id: op.account.id, value: op.expectedBalance }]
-    case 'updateLendingCollected':
+    case 'updateLoanSettled':
       return [
         {
-          table: 'lendings',
-          column: 'collected_amount',
-          id: op.lending.id,
-          value: op.expectedCollectedAmount,
+          table: 'loans',
+          column: 'settled_amount',
+          id: op.loan.id,
+          value: op.expectedSettledAmount,
         },
       ]
     case 'updateWishStatus':
       return [{ table: 'wishes', column: 'status', id: op.wish.id, value: op.expectedStatus }]
-    case 'createLending':
+    case 'createLoan':
     case 'createTransaction':
       return []
   }

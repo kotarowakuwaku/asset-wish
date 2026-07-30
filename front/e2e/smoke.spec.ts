@@ -31,13 +31,14 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
   await page.route('**/api/dashboard', (route) =>
     route.fulfill({
       json: {
-        netAsset: 842000,
+        netAsset: 830000,
         breakdown: {
           cashTotal: 910000,
-          outstandingLendings: 12000,
           commitments: 80000,
         },
         investmentTotal: 350000,
+        outstandingLent: 12000,
+        outstandingBorrowed: 5000,
         averageSurplus: 65000,
         hasAverageSurplus: true,
         wishes: wishes.map((w) => ({
@@ -65,7 +66,7 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
     }),
   )
 
-  await page.route('**/api/lendings*', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/loans*', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/monthly-balances*', (route) =>
     route.fulfill({ json: [] }),
   )
@@ -124,7 +125,7 @@ test('画面を切り替えられる', async ({ page }) => {
   await setupApi(page)
   await signIn(page)
 
-  for (const label of ['口座', '立替', 'ウィッシュ', '月次収支'] as const) {
+  for (const label of ['口座', '貸し借り', 'ウィッシュ', '月次収支'] as const) {
     await page.getByRole('button', { name: label, exact: true }).click()
     await expect(
       page.getByRole('heading', { name: label, exact: true }),

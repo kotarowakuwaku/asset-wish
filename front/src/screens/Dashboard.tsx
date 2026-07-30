@@ -39,17 +39,13 @@ export function Dashboard({ client }: { client: ApiClient }) {
         <p className="net-asset-value">
           <Money amount={data.netAsset} />
         </p>
+        {/* 内訳に並ぶのは実質資産を構成する項目だけ。貸し借りと投資は
+            実質資産の外の参考値なので、この dl には入れない。 */}
         <dl className="breakdown">
           <div>
             <dt>現金・預金</dt>
             <dd>
               <Money amount={data.breakdown.cashTotal} />
-            </dd>
-          </div>
-          <div>
-            <dt>未回収の立替</dt>
-            <dd>
-              +<Money amount={data.breakdown.outstandingLendings} />
             </dd>
           </div>
           <div>
@@ -60,6 +56,33 @@ export function Dashboard({ client }: { client: ApiClient }) {
           </div>
         </dl>
       </section>
+
+      {/* 実質資産には足さない参考値（不変条件4）。立て替えた時点で現金が
+          出たとは限らないため（カード払いなら引き落としはまだ）、
+          「返ってくる／返す予定の額」として横に置くだけにしている。
+
+          貸しと借りを引き算して1つにしない。差額だけだと、誰にいくら
+          貸しているのかが消える。サーバーも分けて返している。 */}
+      <Section title="未精算の貸し借り">
+        {data.outstandingLent > 0 || data.outstandingBorrowed > 0 ? (
+          <dl className="breakdown">
+            <div>
+              <dt>貸している</dt>
+              <dd>
+                <Money amount={data.outstandingLent} />
+              </dd>
+            </div>
+            <div>
+              <dt>借りている</dt>
+              <dd>
+                <Money amount={data.outstandingBorrowed} />
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <Empty>未精算の貸し借りはありません。</Empty>
+        )}
+      </Section>
 
       <Section title="平均月間余剰">
         {data.hasAverageSurplus ? (

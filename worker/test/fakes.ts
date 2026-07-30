@@ -5,7 +5,7 @@
 // 変更した内容が「保存された」ように見えてしまうため、必ず複製して返す。
 
 import { Account } from '../src/domain/account'
-import { Lending } from '../src/domain/lending'
+import { Loan } from '../src/domain/loan'
 import { MonthlyBalance } from '../src/domain/monthlyBalance'
 import { Transaction } from '../src/domain/transaction'
 import { Wish, type WishStatus } from '../src/domain/wish'
@@ -16,7 +16,7 @@ import {
   type AtomicWriter,
   type Clock,
   type IDGenerator,
-  type LendingRepository,
+  type LoanRepository,
   type MonthlyBalanceRepository,
   type TransactionRepository,
   type WishRepository,
@@ -28,8 +28,16 @@ function copyAccount(a: Account): Account {
   return Account.restore(a.id, a.name, a.kind, a.balance, a.updatedAt)
 }
 
-function copyLending(l: Lending): Lending {
-  return Lending.restore(l.id, l.counterparty, l.description, l.amount, l.collectedAmount, l.occurredOn)
+function copyLoan(l: Loan): Loan {
+  return Loan.restore(
+    l.id,
+    l.direction,
+    l.counterparty,
+    l.description,
+    l.amount,
+    l.settledAmount,
+    l.occurredOn,
+  )
 }
 
 function copyWish(w: Wish): Wish {
@@ -73,23 +81,23 @@ export class FakeAccountRepository implements AccountRepository {
   }
 }
 
-export class FakeLendingRepository implements LendingRepository {
-  readonly items = new Map<string, Lending>()
+export class FakeLoanRepository implements LoanRepository {
+  readonly items = new Map<string, Loan>()
 
-  seed(...lendings: Lending[]): void {
-    for (const l of lendings) this.items.set(l.id, copyLending(l))
+  seed(...loans: Loan[]): void {
+    for (const l of loans) this.items.set(l.id, copyLoan(l))
   }
 
-  async list(outstandingOnly: boolean): Promise<Lending[]> {
+  async list(outstandingOnly: boolean): Promise<Loan[]> {
     return [...this.items.values()]
-      .filter((l) => !outstandingOnly || !l.isFullyCollected())
-      .map(copyLending)
+      .filter((l) => !outstandingOnly || !l.isFullySettled())
+      .map(copyLoan)
   }
 
-  async get(id: string): Promise<Lending> {
+  async get(id: string): Promise<Loan> {
     const l = this.items.get(id)
-    if (l === undefined) throw new NotFoundError('立替')
-    return copyLending(l)
+    if (l === undefined) throw new NotFoundError('貸し借り')
+    return copyLoan(l)
   }
 
   async delete(id: string): Promise<void> {
@@ -187,18 +195,18 @@ export class FakeAtomicWriter implements AtomicWriter {
   readonly ops: WriteOperation[] = []
 
   readonly #accounts: FakeAccountRepository
-  readonly #lendings: FakeLendingRepository
+  readonly #loans: FakeLoanRepository
   readonly #wishes: FakeWishRepository
   readonly #transactions: FakeTransactionRepository
 
   constructor(
     accounts: FakeAccountRepository,
-    lendings: FakeLendingRepository,
+    loans: FakeLoanRepository,
     wishes: FakeWishRepository,
     transactions: FakeTransactionRepository,
   ) {
     this.#accounts = accounts
-    this.#lendings = lendings
+    this.#loans = loans
     this.#wishes = wishes
     this.#transactions = transactions
   }
@@ -215,11 +223,11 @@ export class FakeAtomicWriter implements AtomicWriter {
     switch (op.kind) {
       case 'updateAccount':
         return this.#accounts.items.get(op.account.id)?.balance === op.expectedBalance
-      case 'updateLendingCollected':
-        return this.#lendings.items.get(op.lending.id)?.collectedAmount === op.expectedCollectedAmount
+      case 'updateLoanSettled':
+        return this.#loans.items.get(op.loan.id)?.settledAmount === op.expectedSettledAmount
       case 'updateWishStatus':
         return this.#wishes.items.get(op.wish.id)?.status === op.expectedStatus
-      case 'createLending':
+      case 'createLoan':
       case 'createTransaction':
         return true
     }
@@ -227,11 +235,11 @@ export class FakeAtomicWriter implements AtomicWriter {
 
   #apply(op: WriteOperation): void {
     switch (op.kind) {
-      case 'createLending':
-        this.#lendings.seed(op.lending)
+      case 'createLoan':
+        this.#loans.seed(op.loan)
         return
-      case 'updateLendingCollected':
-        this.#lendings.seed(op.lending)
+      case 'updateLoanSettled':
+        this.#loans.seed(op.loan)
         return
       case 'updateWishStatus':
         this.#wishes.seed(op.wish)
@@ -249,12 +257,12 @@ export class FakeAtomicWriter implements AtomicWriter {
 /** すべての fake をまとめて用意する。 */
 export function newFakes() {
   const accounts = new FakeAccountRepository()
-  const lendings = new FakeLendingRepository()
+  const loans = new FakeLoanRepository()
   const wishes = new FakeWishRepository()
   const balances = new FakeMonthlyBalanceRepository()
   const transactions = new FakeTransactionRepository()
-  const writer = new FakeAtomicWriter(accounts, lendings, wishes, transactions)
-  return { accounts, lendings, wishes, balances, transactions, writer }
+  const writer = new FakeAtomicWriter(accounts, loans, wishes, transactions)
+  return { accounts, loans, wishes, balances, transactions, writer }
 }
 
 /** 時刻を固定する。実時刻に依存したテストは日付をまたいだ瞬間に落ちる。 */

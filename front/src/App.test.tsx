@@ -10,8 +10,10 @@ import App from './App'
 // 画面の切り替えなので、各画面が壊れない程度の応答を用意する。
 const emptyDashboard = {
   netAsset: 0,
-  breakdown: { cashTotal: 0, outstandingLendings: 0, commitments: 0 },
+  breakdown: { cashTotal: 0, commitments: 0 },
   investmentTotal: 0,
+  outstandingLent: 0,
+  outstandingBorrowed: 0,
   averageSurplus: 0,
   hasAverageSurplus: false,
   wishes: [],
@@ -83,7 +85,7 @@ describe('トークン設定済みのとき', () => {
     for (const label of [
       'ダッシュボード',
       '口座',
-      '立替',
+      '貸し借り',
       'ウィッシュ',
       '月次収支',
     ]) {

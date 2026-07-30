@@ -5,7 +5,7 @@ import { routes, useRoute } from './app/router'
 import { clearToken, loadToken, saveToken } from './app/token'
 import { Accounts } from './screens/Accounts'
 import { Dashboard } from './screens/Dashboard'
-import { Lendings } from './screens/Lendings'
+import { Loans } from './screens/Loans'
 import { MonthlyBalances } from './screens/MonthlyBalances'
 import { Wishes } from './screens/Wishes'
 
@@ -69,7 +69,7 @@ function App() {
       <main>
         {route === 'dashboard' && <Dashboard client={client} />}
         {route === 'accounts' && <Accounts client={client} />}
-        {route === 'lendings' && <Lendings client={client} />}
+        {route === 'loans' && <Loans client={client} />}
         {route === 'wishes' && <Wishes client={client} />}
         {route === 'monthly-balances' && <MonthlyBalances client={client} />}
       </main>

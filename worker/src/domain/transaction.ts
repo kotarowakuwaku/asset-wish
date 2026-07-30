@@ -3,8 +3,11 @@ import { isZeroMoney, type Money } from './money'
 import type { IsoDate } from './time'
 
 export const TRANSACTION_KINDS = [
-  'lending_created', // 立替の発生。口座から出る
-  'lending_collected', // 立替の回収。口座に戻る
+  // 貸し借りの2種は**もう新しく作られない。** 貸し借りは口座残高を動かさなくなった
+  // ため（不変条件4）。2026-07-30 より前に作られた行を復元するために残して
+  // ある。ここから消すと、既存の履歴が読めなくなる。
+  'lending_created', // 貸し借りの発生。口座から出る
+  'lending_collected', // 貸し借りの精算。口座に戻る
   'wish_paid', // ウィッシュの支払い。口座から出る
   'adjustment', // 残高の手動調整
 ] as const
@@ -16,7 +19,7 @@ export function isTransactionKind(v: string): v is TransactionKind {
   return (TRANSACTION_KINDS as readonly string[]).includes(v)
 }
 
-/** 参照先（立替・ウィッシュ）を必ず伴う種別か。adjustment だけが参照先を持たない。 */
+/** 参照先（貸し借り・ウィッシュ）を必ず伴う種別か。adjustment だけが参照先を持たない。 */
 export function requiresReference(kind: TransactionKind): boolean {
   return kind !== 'adjustment'
 }
@@ -35,7 +38,7 @@ export class Transaction {
   readonly amount: Money
   readonly kind: TransactionKind
   /**
-   * 立替またはウィッシュの ID。adjustment のときだけ null。
+   * 貸し借りまたはウィッシュの ID。adjustment のときだけ null。
    * 参照先が2種類あるため DB では外部キーを張れない（docs/design.md 2.3）。
    */
   readonly refId: string | null

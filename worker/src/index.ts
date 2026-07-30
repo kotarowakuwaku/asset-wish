@@ -7,7 +7,7 @@
 // 別の仕組みを覚える必要がなく、結線が1箇所に見えるほうが学習目的に合う。
 
 import { D1AccountRepository } from './adapter/repository/account'
-import { D1LendingRepository } from './adapter/repository/lending'
+import { D1LoanRepository } from './adapter/repository/loan'
 import { D1MonthlyBalanceRepository } from './adapter/repository/monthlyBalance'
 import { D1TransactionRepository } from './adapter/repository/transaction'
 import { D1WishRepository } from './adapter/repository/wish'
@@ -18,7 +18,7 @@ import type { Deps } from './adapter/handler/services'
 import { loadConfig } from './infra/config'
 import { AccountUsecase } from './usecase/account'
 import { DashboardUsecase } from './usecase/dashboard'
-import { LendingUsecase } from './usecase/lending'
+import { LoanUsecase } from './usecase/loan'
 import { MonthlyBalanceUsecase } from './usecase/monthlyBalance'
 import { newUUID, systemClock } from './usecase/port'
 import { TransactionUsecase } from './usecase/transaction'
@@ -32,7 +32,7 @@ export function buildDeps(env: Env): Deps {
 
   // ここから下が結線。依存の向きは handler → usecase → domain。
   const accountRepo = new D1AccountRepository(env.DB)
-  const lendingRepo = new D1LendingRepository(env.DB)
+  const loanRepo = new D1LoanRepository(env.DB)
   const wishRepo = new D1WishRepository(env.DB)
   const balanceRepo = new D1MonthlyBalanceRepository(env.DB)
   const transactionRepo = new D1TransactionRepository(env.DB)
@@ -43,11 +43,12 @@ export function buildDeps(env: Env): Deps {
 
   return {
     accounts: new AccountUsecase(accountRepo, now, newID),
-    lendings: new LendingUsecase(writer, lendingRepo, accountRepo, now, newID),
+    // 貸し借りは口座を触らない（不変条件4）。accountRepo も Clock も要らない。
+    loans: new LoanUsecase(writer, loanRepo, newID),
     wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
     balances: new MonthlyBalanceUsecase(balanceRepo, newID),
     transactions: new TransactionUsecase(transactionRepo),
-    dashboard: new DashboardUsecase(accountRepo, lendingRepo, wishRepo, balanceRepo, now),
+    dashboard: new DashboardUsecase(accountRepo, loanRepo, wishRepo, balanceRepo, now),
     now,
     authToken,
   }

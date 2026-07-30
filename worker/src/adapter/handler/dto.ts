@@ -6,7 +6,7 @@
 // 型は通るのに実行時に undefined を触ることになる。
 
 import { STALE_BALANCE_THRESHOLD_MS, type Account } from '../../domain/account'
-import type { Lending } from '../../domain/lending'
+import type { Loan } from '../../domain/loan'
 import type { MonthlyBalance } from '../../domain/monthlyBalance'
 import type { Instant } from '../../domain/time'
 import type { Transaction } from '../../domain/transaction'
@@ -25,14 +25,16 @@ export function accountResponse(a: Account, now: Instant) {
   }
 }
 
-export function lendingResponse(l: Lending) {
+export function loanResponse(l: Loan) {
   return {
     id: l.id,
+    // 'lent' か 'borrowed'。金額は向きによらず正なので、向きはこれだけが表す。
+    direction: l.direction,
     counterparty: l.counterparty,
     description: l.description,
     amount: l.amount,
-    // collectedAmount 以外は導出値。DB は持たない（不変条件12）。
-    collectedAmount: l.collectedAmount,
+    // settledAmount 以外は導出値。DB は持たない（不変条件12）。
+    settledAmount: l.settledAmount,
     outstanding: l.outstanding(),
     status: l.status(),
     occurredOn: l.occurredOn,
@@ -79,10 +81,15 @@ export function dashboardResponse(d: Dashboard) {
     netAsset: d.netAsset,
     breakdown: {
       cashTotal: d.breakdown.cashTotal,
-      outstandingLendings: d.breakdown.outstandingLendings,
       commitments: d.breakdown.commitments,
     },
+    // investmentTotal と outstanding* はどちらも実質資産の外の参考値。
+    // breakdown に混ぜないのは、合計に足されない値だと形で示すため
+    // （不変条件1・4）。
     investmentTotal: d.investmentTotal,
+    // 貸しと借りは分けて返す。差額にすると、誰にいくら貸しているのかが消える。
+    outstandingLent: d.outstanding.lent,
+    outstandingBorrowed: d.outstanding.borrowed,
     // 算出不可のときは 0 を返すが、hasAverageSurplus が false なので
     // クライアントは表示しない。
     averageSurplus: d.averageSurplus ?? 0,

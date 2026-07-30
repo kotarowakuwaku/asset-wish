@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { errorMessage, type ApiClient } from '../api/client'
-import type { Lending } from '../api/types'
+import type { Loan, LoanDirection } from '../api/types'
 import { useAsync } from '../app/useAsync'
 import {
   Badge,
@@ -13,34 +13,37 @@ import {
   Section,
 } from '../components/common'
 import {
-  collectionStatusLabel,
   formatDate,
+  loanDirectionLabel,
   parseAmount,
+  settlementStatusLabel,
   todayISO,
 } from '../lib/format'
-import { AccountSelect } from './AccountSelect'
 
 /**
- * Lendings は立替の一覧と、登録・回収・削除を行う。
+ * Loans は貸し借りの一覧と、登録・精算・削除を行う。
  *
- * 未回収残高・回収状態はサーバーが導出した値をそのまま出す。
- * DB は回収額しか持たない（不変条件12）。
+ * 未精算残高・精算状態はサーバーが導出した値をそのまま出す。
+ * DB は精算額しか持たない（不変条件12）。
+ *
+ * **口座を選ばせない。** 貸し借りは口座残高を動かさないため（不変条件4）。
+ * 未精算額はダッシュボードで参考値として出る。
  */
-export function Lendings({ client }: { client: ApiClient }) {
+export function Loans({ client }: { client: ApiClient }) {
   const [outstandingOnly, setOutstandingOnly] = useState(true)
 
   const fetcher = useCallback(
-    () => client.listLendings(outstandingOnly),
+    () => client.listLoans(outstandingOnly),
     [client, outstandingOnly],
   )
   const { data, loading, error, reload } = useAsync(fetcher)
 
-  const lendings = data ?? []
+  const loans = data ?? []
 
   return (
     <>
       <Section
-        title="立替"
+        title="貸し借り"
         actions={
           <div className="tabs" role="group" aria-label="表示の絞り込み">
             <button
@@ -48,7 +51,7 @@ export function Lendings({ client }: { client: ApiClient }) {
               aria-pressed={outstandingOnly}
               onClick={() => setOutstandingOnly(true)}
             >
-              未回収
+              未精算
             </button>
             <button
               type="button"
@@ -62,20 +65,20 @@ export function Lendings({ client }: { client: ApiClient }) {
       >
         {loading && !data && <Loading />}
         {error && <ErrorMessage error={error} onRetry={reload} />}
-        {!error && lendings.length === 0 && !loading && (
+        {!error && loans.length === 0 && !loading && (
           <Empty>
             {outstandingOnly
-              ? '未回収の立替はありません。'
-              : '立替がまだありません。'}
+              ? '未精算の貸し借りはありません。'
+              : '貸し借りがまだありません。'}
           </Empty>
         )}
-        {lendings.length > 0 && (
+        {loans.length > 0 && (
           <ul className="card-list">
-            {lendings.map((lending) => (
-              <LendingItem
-                key={lending.id}
+            {loans.map((loan) => (
+              <LoanItem
+                key={loan.id}
                 client={client}
-                lending={lending}
+                loan={loan}
                 onChanged={reload}
               />
             ))}
@@ -83,66 +86,73 @@ export function Lendings({ client }: { client: ApiClient }) {
         )}
       </Section>
 
-      <Section title="立替を登録">
-        <NewLendingForm client={client} onCreated={reload} />
+      <Section title="貸し借りを登録">
+        <NewLoanForm client={client} onCreated={reload} />
       </Section>
     </>
   )
 }
 
-function LendingItem({
+function LoanItem({
   client,
-  lending,
+  loan,
   onChanged,
 }: {
   client: ApiClient
-  lending: Lending
+  loan: Loan
   onChanged: () => void
 }) {
-  const [collecting, setCollecting] = useState(false)
+  const [settling, setSettling] = useState(false)
 
   return (
     <li className="card">
       <div className="card-head">
-        <strong>{lending.counterparty}</strong>
-        <Badge tone={lending.status === 'collected' ? 'good' : 'warn'}>
-          {collectionStatusLabel(lending.status)}
-        </Badge>
+        <strong>{loan.counterparty}</strong>
+        <span className="actions">
+          {/* 向きは金額の符号では表れないので、必ずラベルで示す。
+              これが無いと、貸したのか借りたのかが画面から読めない。 */}
+          <Badge tone={loan.direction === 'lent' ? 'neutral' : 'warn'}>
+            {loanDirectionLabel(loan.direction)}
+          </Badge>
+          <Badge tone={loan.status === 'settled' ? 'good' : 'warn'}>
+            {settlementStatusLabel(loan.status)}
+          </Badge>
+        </span>
       </div>
 
       <div className="card-body">
-        <span className="muted">{lending.description || '（内容なし）'}</span>
+        <span className="muted">{loan.description || '（内容なし）'}</span>
         <span>
-          <Money amount={lending.amount} className="amount" />
+          <Money amount={loan.amount} className="amount" />
           <span className="muted">
             {' '}
-            / 未回収 <Money amount={lending.outstanding} />
+            / 未精算 <Money amount={loan.outstanding} />
           </span>
         </span>
       </div>
 
       <div className="card-foot">
-        <span className="muted">{formatDate(lending.occurredOn)}</span>
+        <span className="muted">{formatDate(loan.occurredOn)}</span>
         <span className="actions">
-          {lending.outstanding > 0 && (
-            <button type="button" onClick={() => setCollecting((v) => !v)}>
-              {collecting ? '回収をやめる' : '回収を記録'}
+          {loan.outstanding > 0 && (
+            <button type="button" onClick={() => setSettling((v) => !v)}>
+              {settling ? '精算をやめる' : '精算を記録'}
             </button>
           )}
-          <DeleteLendingButton
+          <DeleteLoanButton
             client={client}
-            lending={lending}
+            loan={loan}
             onDeleted={onChanged}
           />
         </span>
       </div>
 
-      {collecting && (
-        <CollectForm
+      {settling && (
+        <SettleForm
           client={client}
-          lending={lending}
-          onCollected={() => {
-            setCollecting(false)
+          loan={loan}
+          onSettled={() => {
+            setSettling(false)
             onChanged()
           }}
         />
@@ -151,13 +161,13 @@ function LendingItem({
   )
 }
 
-function DeleteLendingButton({
+function DeleteLoanButton({
   client,
-  lending,
+  loan,
   onDeleted,
 }: {
   client: ApiClient
-  lending: Lending
+  loan: Loan
   onDeleted: () => void
 }) {
   const [message, setMessage] = useState<string | null>(null)
@@ -166,7 +176,7 @@ function DeleteLendingButton({
   const remove = async () => {
     setBusy(true)
     try {
-      await client.deleteLending(lending.id)
+      await client.deleteLoan(loan.id)
       onDeleted()
     } catch (e) {
       setMessage(errorMessage(e))
@@ -186,24 +196,22 @@ function DeleteLendingButton({
 }
 
 /**
- * CollectForm は回収を記録する。
+ * SettleForm は精算を記録する。
  *
- * 未回収残高を超える額はサーバーが 422 で弾く（不変条件4）。
- * front でも入力段階で気付けるよう未回収残高を示すが、**判定はサーバーが持つ**。
+ * 未精算残高を超える額はサーバーが 422 で弾く（不変条件4）。
+ * front でも入力段階で気付けるよう未精算残高を示すが、**判定はサーバーが持つ**。
  * ここに同じ判定を書くと、ルールが2箇所に増える。
  */
-function CollectForm({
+function SettleForm({
   client,
-  lending,
-  onCollected,
+  loan,
+  onSettled,
 }: {
   client: ApiClient
-  lending: Lending
-  onCollected: () => void
+  loan: Loan
+  onSettled: () => void
 }) {
   const [amount, setAmount] = useState('')
-  const [occurredOn, setOccurredOn] = useState(todayISO())
-  const [accountId, setAccountId] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -212,19 +220,15 @@ function CollectForm({
 
     const parsed = parseAmount(amount)
     if (parsed === null || parsed === 0) {
-      setMessage('回収額は1以上の整数で入力してください')
+      setMessage('精算額は1以上の整数で入力してください')
       return
     }
 
     setBusy(true)
     try {
-      await client.collectLending(lending.id, {
-        amount: parsed,
-        occurredOn,
-        accountId,
-      })
+      await client.settleLoan(loan.id, { amount: parsed })
       setMessage(null)
-      onCollected()
+      onSettled()
     } catch (e) {
       setMessage(errorMessage(e))
     } finally {
@@ -234,7 +238,7 @@ function CollectForm({
 
   return (
     <form onSubmit={submit} className="form inline-form">
-      <Field label="回収額">
+      <Field label="精算額">
         <input
           type="text"
           inputMode="numeric"
@@ -244,43 +248,34 @@ function CollectForm({
         />
       </Field>
       <p className="muted">
-        未回収残高は <Money amount={lending.outstanding} /> です。
+        未精算残高は <Money amount={loan.outstanding} /> です。
       </p>
 
-      <Field label="入金先の口座">
-        <AccountSelect client={client} value={accountId} onChange={setAccountId} />
-      </Field>
-
-      <Field label="日付">
-        <input
-          type="date"
-          value={occurredOn}
-          onChange={(e) => setOccurredOn(e.target.value)}
-          required
-        />
-      </Field>
+      {/* 入金先の口座も精算日も聞かない。貸し借りは口座残高を動かさず、
+          取引履歴も残さない（不変条件4）。日付を聞いても残す先が無い。 */}
 
       <FormError message={message} />
 
-      <button type="submit" disabled={busy || accountId === ''}>
-        回収を記録する
+      <button type="submit" disabled={busy}>
+        精算を記録する
       </button>
     </form>
   )
 }
 
-function NewLendingForm({
+function NewLoanForm({
   client,
   onCreated,
 }: {
   client: ApiClient
   onCreated: () => void
 }) {
+  // 貸した側を既定にする。立て替えのほうが件数が多い。
+  const [direction, setDirection] = useState<LoanDirection>('lent')
   const [counterparty, setCounterparty] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [occurredOn, setOccurredOn] = useState(todayISO())
-  const [accountId, setAccountId] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -289,18 +284,19 @@ function NewLendingForm({
 
     const parsed = parseAmount(amount)
     if (parsed === null || parsed === 0) {
-      setMessage('立替額は1以上の整数で入力してください')
+      setMessage('金額は1以上の整数で入力してください')
       return
     }
 
     setBusy(true)
     try {
-      await client.createLending({
+      await client.createLoan({
+        direction,
         counterparty,
         description,
+        // 借りた場合も正の値で送る。符号で向きを表さない。
         amount: parsed,
         occurredOn,
-        accountId,
       })
       setCounterparty('')
       setDescription('')
@@ -316,6 +312,18 @@ function NewLendingForm({
 
   return (
     <form onSubmit={submit} className="form">
+      {/* 向きは select で選ばせる。金額の符号に混ぜると、
+          「−5000 と入れたら借りたことになる」という当てにくい仕様になる。 */}
+      <Field label="どちら">
+        <select
+          value={direction}
+          onChange={(e) => setDirection(e.target.value as LoanDirection)}
+        >
+          <option value="lent">貸した（立て替えた）</option>
+          <option value="borrowed">借りた</option>
+        </select>
+      </Field>
+
       <Field label="相手">
         <input
           type="text"
@@ -333,7 +341,7 @@ function NewLendingForm({
         />
       </Field>
 
-      <Field label="立替額">
+      <Field label="金額">
         <input
           type="text"
           inputMode="numeric"
@@ -343,10 +351,9 @@ function NewLendingForm({
         />
       </Field>
 
-      {/* 立て替えた時点で口座から金は出ている。残高もあわせて減る。 */}
-      <Field label="支払い元の口座">
-        <AccountSelect client={client} value={accountId} onChange={setAccountId} />
-      </Field>
+      {/* 支払い元の口座は聞かない。立て替えた時点で現金が出たとは限らない
+          （カード払いなら引き落としはまだ）。未精算額はダッシュボードの
+          参考値として出るだけで、口座残高は動かさない（不変条件4）。 */}
 
       <Field label="日付">
         <input
@@ -359,7 +366,7 @@ function NewLendingForm({
 
       <FormError message={message} />
 
-      <button type="submit" disabled={busy || accountId === ''}>
+      <button type="submit" disabled={busy}>
         登録する
       </button>
     </form>
