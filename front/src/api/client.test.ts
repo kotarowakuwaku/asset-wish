@@ -65,19 +65,19 @@ describe('エラーの変換', () => {
     stubFetch(
       jsonResponse(422, {
         error: {
-          code: 'COLLECT_EXCEEDS_OUTSTANDING',
-          message: '回収額が未回収残高を超えています',
+          code: 'SETTLE_EXCEEDS_OUTSTANDING',
+          message: '精算額が未精算残高を超えています',
         },
       }),
     )
 
     const err = (await createClient(token)
-      .collectLending('id', { amount: 1 })
+      .settleLoan('id', { amount: 1 })
       .catch((e: unknown) => e)) as ApiError
 
     expect(err.isDomainError).toBe(true)
-    expect(err.code).toBe('COLLECT_EXCEEDS_OUTSTANDING')
-    expect(err.message).toBe('回収額が未回収残高を超えています')
+    expect(err.code).toBe('SETTLE_EXCEEDS_OUTSTANDING')
+    expect(err.message).toBe('精算額が未精算残高を超えています')
   })
 
   it('404 は業務ルール違反ではない', async () => {
@@ -135,12 +135,12 @@ describe('レスポンスの扱い', () => {
 
 describe('経路の組み立て', () => {
   it.each([
-    [true, '/api/lendings?outstanding=true'],
-    [false, '/api/lendings'],
-  ])('未回収のみ=%s のとき %s を呼ぶ', async (outstandingOnly, wantPath) => {
+    [true, '/api/loans?outstanding=true'],
+    [false, '/api/loans'],
+  ])('未精算のみ=%s のとき %s を呼ぶ', async (outstandingOnly, wantPath) => {
     const spy = stubFetch(jsonResponse(200, []))
 
-    await createClient(token).listLendings(outstandingOnly)
+    await createClient(token).listLoans(outstandingOnly)
 
     const [url] = spy.mock.calls[0]
     expect(url).toContain(wantPath)

@@ -13,14 +13,14 @@ describe('Transaction.create', () => {
     refId: string | null
     wantErr: DomainErrorCode | null
   }[] = [
-    { name: '立替の発生（出金）', amount: -12_000, kind: 'lending_created', refId: ref, wantErr: null },
-    { name: '立替の回収（入金）', amount: 5_000, kind: 'lending_collected', refId: ref, wantErr: null },
+    { name: '貸し借りの発生（出金）', amount: -12_000, kind: 'lending_created', refId: ref, wantErr: null },
+    { name: '貸し借りの精算（入金）', amount: 5_000, kind: 'lending_collected', refId: ref, wantErr: null },
     { name: 'ウィッシュの支払い', amount: -80_000, kind: 'wish_paid', refId: ref, wantErr: null },
     { name: '手動調整は参照先なしでよい', amount: -300, kind: 'adjustment', refId: null, wantErr: null },
     { name: '金額0は記録する意味が無い', amount: 0, kind: 'adjustment', refId: null, wantErr: 'INVALID_AMOUNT' },
     { name: '未知の種別', amount: -100, kind: 'refund' as never, refId: ref, wantErr: 'INVALID_TRANSACTION_KIND' },
-    { name: '立替の発生に参照先が無い', amount: -100, kind: 'lending_created', refId: null, wantErr: 'MISSING_REFERENCE' },
-    { name: '立替の回収に参照先が無い', amount: 100, kind: 'lending_collected', refId: null, wantErr: 'MISSING_REFERENCE' },
+    { name: '貸し借りの発生に参照先が無い', amount: -100, kind: 'lending_created', refId: null, wantErr: 'MISSING_REFERENCE' },
+    { name: '貸し借りの精算に参照先が無い', amount: 100, kind: 'lending_collected', refId: null, wantErr: 'MISSING_REFERENCE' },
     { name: '支払いに参照先が無い', amount: -100, kind: 'wish_paid', refId: null, wantErr: 'MISSING_REFERENCE' },
   ]
 

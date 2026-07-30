@@ -95,7 +95,7 @@ export class Account {
   /**
    * 残高を増減させる。ウィッシュの支払いで用いる。
    *
-   * 立替の発生・回収では**用いない。** 立替は口座残高を動かさない（不変条件4）。
+   * 貸し借りの発生・精算では**用いない。** 貸し借りは口座残高を動かさない（不変条件4）。
    */
   applyDelta(delta: Money, now: Instant): void {
     this.#balance = addMoney(this.#balance, delta)

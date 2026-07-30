@@ -23,7 +23,8 @@ const base: DashboardData = {
     commitments: 80000,
   },
   investmentTotal: 350000,
-  outstandingLendings: 12000,
+  outstandingLent: 12000,
+  outstandingBorrowed: 5000,
   averageSurplus: 65000,
   hasAverageSurplus: true,
   wishes: [],
@@ -52,9 +53,9 @@ describe('実質資産', () => {
     expect(screen.queryByText(/投資/)).not.toBeInTheDocument()
   })
 
-  // 立替は実質資産の内訳ではない（不変条件4）。内訳の dl に混ぜると
-  // 「合計に足されている」と読める。
-  it('未回収の立替は内訳ではなく別枠に出す', async () => {
+  // 貸し借りは実質資産の内訳ではない（不変条件4）。実質資産の内訳の dl に
+  // 混ぜると「合計に足されている」と読める。
+  it('未精算の貸し借りは実質資産の内訳ではなく別枠に出す', async () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
@@ -62,24 +63,59 @@ describe('実質資産', () => {
     })
 
     expect(
-      screen.getByRole('heading', { name: '未回収の立替' }),
+      screen.getByRole('heading', { name: '未精算の貸し借り' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('¥12,000')).toBeInTheDocument()
 
-    // 内訳に並ぶのは現金・預金と確定した支出だけ。
+    // 実質資産の内訳に並ぶのは現金・預金と確定した支出だけ。貸し借りの
+    // 2行はそのあとの別セクションに出る。
     const terms = screen.getAllByRole('term').map((t) => t.textContent)
-    expect(terms).toEqual(['現金・預金', '確定した支出'])
+    expect(terms).toEqual([
+      '現金・預金',
+      '確定した支出',
+      '貸している',
+      '借りている',
+    ])
   })
 
-  // 0 を「¥0」と出すと、立替が1件あって全額回収済みなのか、
-  // そもそも無いのかが読み取れない。
-  it('未回収が0なら金額を出さない', async () => {
-    render(<Dashboard client={stubClient({ ...base, outstandingLendings: 0 })} />)
+  // 差額（12,000 − 5,000 = 7,000）に丸めると、誰にいくら貸しているのかが消える。
+  it('貸しと借りを差額にせず、両方の金額を出す', async () => {
+    render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByText('未回収の立替はありません。')).toBeInTheDocument()
+      expect(screen.getByText('¥12,000')).toBeInTheDocument()
+    })
+    expect(screen.getByText('¥5,000')).toBeInTheDocument()
+    expect(screen.queryByText('¥7,000')).not.toBeInTheDocument()
+  })
+
+  // 0 を「¥0」と出すと、貸し借りが1件あって全額精算済みなのか、
+  // そもそも無いのかが読み取れない。
+  it('貸しも借りも0なら金額を出さない', async () => {
+    render(
+      <Dashboard
+        client={stubClient({
+          ...base,
+          outstandingLent: 0,
+          outstandingBorrowed: 0,
+        })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('未精算の貸し借りはありません。')).toBeInTheDocument()
     })
     expect(screen.queryByText('¥0')).not.toBeInTheDocument()
+  })
+
+  // 片方だけあるときに欄が消えると、「借りている分は無い」ことが分からない。
+  it('片方が0でも両方の行を出す', async () => {
+    render(<Dashboard client={stubClient({ ...base, outstandingBorrowed: 0 })} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('¥12,000')).toBeInTheDocument()
+    })
+    expect(screen.getByText('借りている')).toBeInTheDocument()
+    expect(screen.getByText('¥0')).toBeInTheDocument()
   })
 })
 

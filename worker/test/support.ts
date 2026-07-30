@@ -6,7 +6,7 @@
 import { expect } from 'vitest'
 import { Account, type AccountKind } from '../src/domain/account'
 import { isDomainError, type DomainErrorCode } from '../src/domain/errors'
-import { Lending } from '../src/domain/lending'
+import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money, type Money } from '../src/domain/money'
 import { MonthlyBalance } from '../src/domain/monthlyBalance'
 import { parseIsoDate, toInstant, type IsoDate, type Instant } from '../src/domain/time'
@@ -36,8 +36,18 @@ export function acct(kind: AccountKind, balance: number): Account {
   return Account.create(id(), 'テスト口座', kind, yen(balance), SOME_INSTANT)
 }
 
-export function lend(amount: number, collected: number): Lending {
-  return Lending.restore(id(), 'テスト相手', '', yen(amount), yen(collected), SOME_DATE)
+/** 貸した金。向きを書かずに済むのは、こちらが既定の向きだから。 */
+export function lend(amount: number, settled: number): Loan {
+  return loan('lent', amount, settled)
+}
+
+/** 借りた金。 */
+export function borrow(amount: number, settled: number): Loan {
+  return loan('borrowed', amount, settled)
+}
+
+export function loan(direction: LoanDirection, amount: number, settled: number): Loan {
+  return Loan.restore(id(), direction, 'テスト相手', '', yen(amount), yen(settled), SOME_DATE)
 }
 
 export function wish(amount: number, status: WishStatus): Wish {

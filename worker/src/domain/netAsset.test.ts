@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { acct, lend, mb, wish, yen } from '../../test/support'
+import { acct, borrow, lend, mb, wish, yen } from '../../test/support'
 import type { Account } from './account'
-import type { Lending } from './lending'
+import type { Loan } from './loan'
 import {
   averageSurplus,
   calculateBreakdown,
   calculateInvestmentTotal,
-  calculateOutstandingLendings,
+  calculateOutstandingLoans,
   calculateShortfall,
   monthlySavingNeeded,
   monthsToReach,
@@ -95,23 +95,39 @@ describe('calculateInvestmentTotal', () => {
   })
 })
 
-// 立替は実質資産の外の参考値（不変条件4）。ここが壊れると、カードで
+// 貸し借りは実質資産の外の参考値（不変条件4）。ここが壊れると、カードで
 // 立て替えた分だけ資産が多く見える。
-describe('calculateOutstandingLendings', () => {
-  const cases: { name: string; lendings: Lending[]; want: number }[] = [
-    { name: 'A-3: 未回収は全額が残高になる', lendings: [lend(12_000, 0)], want: 12_000 },
-    { name: 'A-4: 一部回収なら残りだけ', lendings: [lend(12_000, 5_000)], want: 7_000 },
-    { name: 'A-5: 全額回収なら 0', lendings: [lend(12_000, 12_000)], want: 0 },
+describe('calculateOutstandingLoans', () => {
+  const cases: {
+    name: string
+    loans: Loan[]
+    wantLent?: number
+    wantBorrowed?: number
+  }[] = [
+    { name: 'A-3: 未精算は全額が残高になる', loans: [lend(12_000, 0)], wantLent: 12_000 },
+    { name: 'A-4: 一部精算なら残りだけ', loans: [lend(12_000, 5_000)], wantLent: 7_000 },
+    { name: 'A-5: 全額精算なら 0', loans: [lend(12_000, 12_000)] },
     {
-      name: 'A-12: 複数件を合計する',
-      lendings: [lend(12_000, 0), lend(8_000, 3_000)],
-      want: 17_000,
+      name: 'A-12: 同じ向きは合計する',
+      loans: [lend(12_000, 0), lend(8_000, 3_000)],
+      wantLent: 17_000,
     },
-    { name: 'A-13: 空なら 0', lendings: [], want: 0 },
+    { name: 'A-13: 空なら 0', loans: [] },
+    { name: 'A-14: 借りた分は borrowed に入る', loans: [borrow(5_000, 0)], wantBorrowed: 5_000 },
+    // 差額にすると、誰にいくら貸しているのかが消える。
+    {
+      name: 'A-15: 貸しと借りを混ぜず、別々に持つ',
+      loans: [lend(12_000, 0), borrow(5_000, 1_000)],
+      wantLent: 12_000,
+      wantBorrowed: 4_000,
+    },
   ]
 
   it.each(cases)('$name', (c) => {
-    expect(calculateOutstandingLendings(c.lendings)).toBe(c.want)
+    expect(calculateOutstandingLoans(c.loans)).toEqual({
+      lent: c.wantLent ?? 0,
+      borrowed: c.wantBorrowed ?? 0,
+    })
   })
 })
 

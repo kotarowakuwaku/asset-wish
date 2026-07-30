@@ -2,9 +2,9 @@
 
 > **実装言語の変更について（2026-07）：** サーバーの実装は Go から TypeScript（Cloudflare Workers + D1）に移行した。**本書が定めるシグネチャ・エラーコード・テストケースの意図はそのまま有効**だが、**コード例は Go 版の記述**である。実際のシグネチャは `worker/src/` を正とする。移行で変わった点は `docs/migration-cloudflare.md` に集約してある。
 
-> **仕様変更について（2026-07-30）：** **立替を実質資産の計算から外し、口座残高も取引履歴も触らないようにした。** 実質資産は `現金・預金 − 確定支出` になり、未回収の立替は投資資産と同じ別枠の参考値になった。
+> **仕様変更について（2026-07-30）：** **貸し借りを実質資産の計算から外し、口座残高も取引履歴も触らないようにした。** 実質資産は `現金・預金 − 確定支出` になり、未精算の貸し借りは投資資産と同じ別枠の参考値になった。
 >
-> 本書は「`design.md` と矛盾する場合は本書が正」と位置づけているが、**この仕様変更については `docs/requirements.md` v1.1 と `CLAUDE.md` の不変条件4が正**。本書の該当箇所（2.5 の `Outstanding`、2.9 の `NetAssetBreakdown` / `CalculateBreakdown`、3.2 の立替のユースケース、6.3 の API、7.3 のテストケース表）は下に注記を入れて残してある。**残しているのは、何をどう変えたかを後から辿れるようにするため。読むときは注記のほうを取ること。** 経緯と理由は `docs/spec-changes.md` の 2a。
+> 本書は「`design.md` と矛盾する場合は本書が正」と位置づけているが、**この仕様変更については `docs/requirements.md` v1.1 と `CLAUDE.md` の不変条件4が正**。本書の該当箇所（2.5 の `Outstanding`、2.9 の `NetAssetBreakdown` / `CalculateBreakdown`、3.2 の貸し借りのユースケース、6.3 の API、7.3 のテストケース表）は下に注記を入れて残してある。**残しているのは、何をどう変えたかを後から辿れるようにするため。読むときは注記のほうを取ること。** 経緯と理由は `docs/spec-changes.md` の 2a。
 
 
 個人資産・ウィッシュ管理アプリ
@@ -32,7 +32,7 @@ worker/src/domain/
 ├── money.go            Money
 ├── year_month.go       YearMonth
 ├── account.go          Account, AccountKind
-├── lending.go          Lending, CollectionStatus
+├── loan.go             Loan, LoanDirection, SettlementStatus
 ├── wish.go             Wish, WishStatus, WishCategory
 ├── monthly_balance.go  MonthlyBalance
 ├── transaction.go      Transaction, TransactionKind
@@ -155,12 +155,12 @@ func IsDomainError(err error) bool {
 | `ErrInvalidAmount` | `INVALID_AMOUNT` | 金額は1円以上である必要があります |
 | `ErrNegativeAmount` | `NEGATIVE_AMOUNT` | 金額に負の値は指定できません |
 | `ErrEmptyTitle` | `EMPTY_TITLE` | 名称は必須です |
-| `ErrEmptyCounterparty` | `EMPTY_COUNTERPARTY` | 立替の相手は必須です |
+| `ErrEmptyCounterparty` | `EMPTY_COUNTERPARTY` | 貸し借りの相手は必須です |
 | `ErrInvalidAccountKind` | `INVALID_ACCOUNT_KIND` | 口座種別が不正です |
 | `ErrInvalidWishCategory` | `INVALID_WISH_CATEGORY` | ウィッシュ種別が不正です |
 | `ErrInvalidWishStatus` | `INVALID_WISH_STATUS` | ウィッシュ状態が不正です |
 | `ErrInvalidTransition` | `INVALID_TRANSITION` | この状態からは実行できない操作です |
-| `ErrCollectExceedsOutstanding` | `COLLECT_EXCEEDS_OUTSTANDING` | 回収額が未回収残高を超えています |
+| `ErrSettleExceedsOutstanding` | `SETTLE_EXCEEDS_OUTSTANDING` | 精算額が未精算残高を超えています |
 | `ErrInvalidYearMonth` | `INVALID_YEAR_MONTH` | 年月の指定が不正です |
 
 すべて `*DomainError` のパッケージ変数として定義し、`errors.Is` で比較できるようにする。
@@ -200,7 +200,7 @@ func (a Account) CountsTowardNetAsset() bool {
 func (a *Account) UpdateBalance(balance Money, now time.Time)
 
 // ApplyDelta は残高を増減させる。ウィッシュの支払いで用いる。
-// （2026-07-30 より前は立替の発生・回収でも用いていた）
+// （2026-07-30 より前は貸し借りの発生・精算でも用いていた）
 func (a *Account) ApplyDelta(delta Money, now time.Time)
 
 // IsStale は最終更新から threshold 以上経過しているかを返す。
@@ -210,51 +210,63 @@ func (a Account) IsStale(now time.Time, threshold time.Duration) bool
 
 `Balance` に負値を許すのは、口座が一時的にマイナスになる状況を表現できるようにするため。DDL にも CHECK 制約を置いていない。
 
-### 2.5 Lending
+### 2.5 Loan
 
 ```go
-// CollectionStatus は回収状態。DB には保存せず、金額から導出する。
-type CollectionStatus string
+// SettlementStatus は精算状態。DB には保存せず、金額から導出する。
+type SettlementStatus string
 
 const (
-    CollectionUncollected CollectionStatus = "uncollected" // 未回収
-    CollectionPartial     CollectionStatus = "partial"     // 一部回収
-    CollectionCollected   CollectionStatus = "collected"   // 回収済
+    SettlementUnsettled SettlementStatus = "unsettled" // 未精算
+    SettlementPartial   SettlementStatus = "partial"   // 一部精算
+    SettlementSettled   SettlementStatus = "settled"   // 精算済
 )
 
-type Lending struct {
-    ID              uuid.UUID
-    Counterparty    string
-    Description     string
-    Amount          Money
-    CollectedAmount Money
-    OccurredOn      time.Time // 日付のみ。時刻部分は 00:00:00 UTC
+// LoanDirection は貸借の向き（2026-07-30 の変更で追加）。
+type LoanDirection string
+
+const (
+    LoanLent     LoanDirection = "lent"     // 貸した（立て替えた）
+    LoanBorrowed LoanDirection = "borrowed" // 借りた
+)
+
+func (d LoanDirection) Valid() bool
+
+type Loan struct {
+    ID            uuid.UUID
+    Direction     LoanDirection
+    Counterparty  string
+    Description   string
+    Amount        Money // 向きによらず正。負の金額で「借りた」を表さない
+    SettledAmount Money
+    OccurredOn    time.Time // 日付のみ。時刻部分は 00:00:00 UTC
 }
 
-// NewLending は立替を生成する。CollectedAmount は 0 で初期化される。
-// counterparty が空、または amount が 1 未満なら error を返す。
-func NewLending(id uuid.UUID, counterparty, description string, amount Money, occurredOn time.Time) (Lending, error)
+// NewLoan は貸借を生成する。SettledAmount は 0 で初期化される。
+// counterparty が空、amount が 1 未満、direction が不正なら error を返す。
+func NewLoan(id uuid.UUID, direction LoanDirection, counterparty, description string, amount Money, occurredOn time.Time) (Loan, error)
 
-// Outstanding は未回収残高を返す。
-// 【不変条件】Amount - CollectedAmount であること。
+// Outstanding は未精算残高を返す。
+// 【不変条件】Amount - SettledAmount であること。
 // 【2026-07-30 の変更】実質資産には加算しない。別枠の参考値として表示するだけ。
-func (l Lending) Outstanding() Money {
-    return l.Amount.Sub(l.CollectedAmount)
+func (l Loan) Outstanding() Money {
+    return l.Amount.Sub(l.SettledAmount)
 }
 
-func (l Lending) IsFullyCollected() bool
+func (l Loan) IsFullySettled() bool
 
-// Status は回収状態を導出する。
-//   CollectedAmount == 0        → uncollected
-//   0 < CollectedAmount < Amount → partial
-//   CollectedAmount == Amount    → collected
-func (l Lending) Status() CollectionStatus
+// Status は精算状態を導出する。
+//   SettledAmount == 0         → unsettled
+//   0 < SettledAmount < Amount → partial
+//   SettledAmount == Amount    → settled
+func (l Loan) Status() SettlementStatus
 
-// Collect は回収を記録する。
+// Settle は精算を記録する。貸した側では回収、借りた側では返済にあたる。
+// **向きで処理を分けない。** どちらも未精算残高が減るだけ。
 //   amount が 1 未満        → ErrInvalidAmount
-//   amount > Outstanding() → ErrCollectExceedsOutstanding
-// 【不変条件】過回収を絶対に許さないこと。
-func (l *Lending) Collect(amount Money) error
+//   amount > Outstanding() → ErrSettleExceedsOutstanding
+// 【不変条件】過精算を絶対に許さないこと。
+func (l *Loan) Settle(amount Money) error
 ```
 
 ### 2.6 Wish
@@ -381,7 +393,7 @@ const StaleBalanceThreshold = 45 * 24 * time.Hour
 
 #### 2.9.1 NetAssetBreakdown
 
-> **2026-07-30 の変更：** `OutstandingLendings` を**この型から外した。** 未回収の立替は実質資産に足さないため、内訳に置いたまま `NetAsset()` で無視する形にすると「内訳にあるのに合計に入っていない項目」ができ、あとから足し戻す事故が起きうる。`NetAsset()` が全フィールドを必ず使う形を保ち、未回収額は `CalculateOutstandingLendings`（2.9.2 の末尾）が別に返す。
+> **2026-07-30 の変更：** `OutstandingLoans` を**この型から外した。** 未精算の貸し借りは実質資産に足さないため、内訳に置いたまま `NetAsset()` で無視する形にすると「内訳にあるのに合計に入っていない項目」ができ、あとから足し戻す事故が起きうる。`NetAsset()` が全フィールドを必ず使う形を保ち、未精算額は `CalculateOutstandingLoans`（2.9.2 の末尾）が別に返す。
 
 ```go
 // NetAssetBreakdown は実質資産の内訳。
@@ -409,7 +421,7 @@ func (b NetAssetBreakdown) NetAsset() Money {
 //   - kind が investment の口座は CashTotal に含めない
 //   - status が committed 以外のウィッシュは Commitments に含めない
 //
-// 【2026-07-30 の変更】立替を引数に取らない。実質資産に一切関与しなくなったため。
+// 【2026-07-30 の変更】貸し借りを引数に取らない。実質資産に一切関与しなくなったため。
 // 引数に残すと「使わない引数」ができ、読む側が関与を疑う。
 //
 // 引数のスライスは変更しない。空スライス・nil はいずれも 0 として扱う。
@@ -435,15 +447,23 @@ func CalculateBreakdown(accounts []Account, wishes []Wish) NetAssetBreakdown {
 }
 ```
 
-**未回収の立替は別の関数で出す。**
+**未精算の貸し借りは別の関数で出す。**
 
 ```go
-// CalculateOutstandingLendings は未回収の立替の合計を返す。
+// OutstandingLoans は未精算残高を向きごとに分けた合計。
+//
+// 差額にまとめない。引き算すると、誰にいくら貸しているのかが消える。
+type OutstandingLoans struct {
+    Lent     Money // 貸していて、まだ返ってきていない額
+    Borrowed Money // 借りていて、まだ返していない額
+}
+
+// CalculateOutstandingLoans は未精算の貸し借りを向きごとに合計して返す。
 //
 // 【不変条件】実質資産には含めない。投資資産と同じ、別枠の参考値である。
 // 立て替えた時点で現金が出たとは限らない（カード払いなら引き落としはまだ）ため、
 // 残高にも実質資産にも触らせない。
-func CalculateOutstandingLendings(lendings []Lending) Money
+func CalculateOutstandingLoans(loans []Loan) OutstandingLoans
 ```
 
 #### 2.9.3 その他の集計
@@ -542,7 +562,7 @@ type Transaction struct {
     AccountID uuid.UUID
     Amount    Money           // 符号付き。口座から出るときは負
     Kind      TransactionKind
-    RefID     *uuid.UUID      // 立替またはウィッシュの ID。adjustment のみ nil
+    RefID     *uuid.UUID      // 貸し借りまたはウィッシュの ID。adjustment のみ nil
     OccurredOn time.Time
 }
 ```
@@ -576,12 +596,12 @@ type AccountRepository interface {
     Delete(ctx context.Context, id uuid.UUID) error
 }
 
-type LendingRepository interface {
-    List(ctx context.Context, outstandingOnly bool) ([]domain.Lending, error)
-    Get(ctx context.Context, id uuid.UUID) (domain.Lending, error)
-    Create(ctx context.Context, l domain.Lending) error
-    // UpdateCollected は回収額だけを反映する。
-    UpdateCollected(ctx context.Context, l domain.Lending) error
+type LoanRepository interface {
+    List(ctx context.Context, outstandingOnly bool) ([]domain.Loan, error)
+    Get(ctx context.Context, id uuid.UUID) (domain.Loan, error)
+    Create(ctx context.Context, l domain.Loan) error
+    // UpdateSettled は精算額だけを反映する。
+    UpdateSettled(ctx context.Context, l domain.Loan) error
     Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -624,7 +644,7 @@ type TxManager interface {
 
 - `AccountRepository.Update` は名称・残高・更新日時のみ。`Kind` は変えられない（不変条件1）
 - `WishRepository` は内容と状態で分ける（不変条件6）
-- `LendingRepository` は回収額のみ更新できる（不変条件4）
+- `LoanRepository` は精算額のみ更新できる（不変条件4）
 
 `MonthlyBalanceRepository.Upsert` が保存後の姿を返すのは ID のため。`ON CONFLICT DO UPDATE` は既存行の ID を維持するので、呼び出し側が採番した ID は競合時に捨てられる。返さないと、DB に存在しない ID を持ったまま処理が進む。
 
@@ -632,32 +652,32 @@ type TxManager interface {
 
 複数テーブルを更新するものは、`TxManager.RunInTx` の中で実行する。
 
-#### 3.2.1 立替の登録（CreateLending）
+#### 3.2.1 貸し借りの登録（CreateLoan）
 
 > **2026-07-30 の変更。** 口座残高も取引履歴も触らなくなった。**入力から `accountID` が消えている。** 変更前は「立て替えた時点で自分の口座から金が出ている」と決め打ちして残高を減らしていたが、カードで立て替えた場合は現金がまだ出ていない。
 
 ```
 入力: counterparty, description, amount, occurredOn
 
-1. domain.NewLending(...) で生成（バリデーションはここ）
-2. lendingRepo.Create(lending)
+1. domain.NewLoan(...) で生成（バリデーションはここ）
+2. loanRepo.Create(loan)
 ```
 
 変更前は、口座の取得・残高の増減・取引履歴の記録を含む5手順をトランザクションの中で実行していた。
 
-#### 3.2.2 立替の回収（CollectLending）
+#### 3.2.2 貸し借りの精算（SettleLoan）
 
-> **2026-07-30 の変更。** 口座残高も取引履歴も触らなくなった。**入力から `accountID` と `occurredOn` が消えている。** 回収日は取引履歴の `occurred_on` に入れていたが、その履歴が作られなくなったため残す先が無い。
+> **2026-07-30 の変更。** 口座残高も取引履歴も触らなくなった。**入力から `accountID` と `occurredOn` が消えている。** 精算日は取引履歴の `occurred_on` に入れていたが、その履歴が作られなくなったため残す先が無い。
 
 ```
-入力: lendingID, amount
+入力: loanID, amount
 
-1. lendingRepo.Get(lendingID)     → 無ければ ErrNotFound
-2. lending.Collect(amount)         → 過回収なら ErrCollectExceedsOutstanding
-3. lendingRepo.Update(lending)     ← 読み取り時の CollectedAmount を条件にする
+1. loanRepo.Get(loanID)     → 無ければ ErrNotFound
+2. loan.Settle(amount)          → 過精算なら ErrSettleExceedsOutstanding
+3. loanRepo.Update(loan)     ← 読み取り時の SettledAmount を条件にする
 ```
 
-**手順3は「読み取った時点から回収額が変わっていないこと」を条件に書き込む。** 取得と更新の間に別の回収が入ると、どちらも未回収残高の範囲内に見えて過回収が成立しうる。書き込みが1行だけになっても `AtomicWriter` を通しているのはこのためで、楽観ロックの仕組みをそこが持っている（`docs/migration-cloudflare.md` 4章）。
+**手順3は「読み取った時点から精算額が変わっていないこと」を条件に書き込む。** 取得と更新の間に別の精算が入ると、どちらも未精算残高の範囲内に見えて過精算が成立しうる。書き込みが1行だけになっても `AtomicWriter` を通しているのはこのためで、楽観ロックの仕組みをそこが持っている（`docs/migration-cloudflare.md` 4章）。
 
 #### 3.2.3 ウィッシュの支払い（PayWish）
 
@@ -682,13 +702,13 @@ type TxManager interface {
 
 ```
 1. accountRepo.List()
-2. lendingRepo.List(outstandingOnly: true)
+2. loanRepo.List(outstandingOnly: true)
 3. wishRepo.List(status: nil)
 4. monthlyRepo.ListRecent(domain.AverageSurplusMonths)
-5. breakdown := domain.CalculateBreakdown(accounts, wishes)   // 立替は渡さない
+5. breakdown := domain.CalculateBreakdown(accounts, wishes)   // 貸し借りは渡さない
 6. netAsset := breakdown.NetAsset()
 7. investment := domain.CalculateInvestmentTotal(accounts)
-7'. outstanding := domain.CalculateOutstandingLendings(lendings)  // 参考値
+7'. outstanding := domain.CalculateOutstandingLoans(loans)  // 参考値
 8. avg, hasAvg := domain.AverageSurplus(balances, domain.AverageSurplusMonths)
 9. 各ウィッシュ（done / dropped を除く）について:
      shortfall := domain.CalculateShortfall(w, netAsset)
@@ -714,7 +734,7 @@ type TxManager interface {
 | `WishStatus` | `string` | 同上 |
 | `WishCategory` | `string` | 同上 |
 | `*time.Time`（Deadline） | `sql.NullTime` | null 相互変換 |
-| `CollectionStatus` | — | **DB に列を持たない。** 復元時に導出 |
+| `SettlementStatus` | — | **DB に列を持たない。** 復元時に導出 |
 
 **復元時の検証を省かない。** DB に不正な値が入っている可能性は CHECK 制約で低いが、ドメイン層に不正な値を渡さないための最後の関門となる。
 
@@ -757,32 +777,32 @@ WHERE id = $1;
 DELETE FROM accounts WHERE id = $1;
 ```
 
-### 5.2 lendings.sql
+### 5.2 loans.sql
 
 ```sql
 -- name: ListLendings :many
-SELECT * FROM lendings ORDER BY occurred_on DESC;
+SELECT * FROM loans ORDER BY occurred_on DESC;
 
--- name: ListOutstandingLendings :many
-SELECT * FROM lendings
-WHERE collected_amount < amount
+-- name: ListOutstandingLoans :many
+SELECT * FROM loans
+WHERE settled_amount < amount
 ORDER BY occurred_on DESC;
 
 -- name: GetLending :one
-SELECT * FROM lendings WHERE id = $1;
+SELECT * FROM loans WHERE id = $1;
 
--- name: CreateLending :exec
-INSERT INTO lendings (id, counterparty, description, amount, collected_amount, occurred_on)
+-- name: CreateLoan :exec
+INSERT INTO loans (id, counterparty, description, amount, settled_amount, occurred_on)
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: UpdateLending :exec
-UPDATE lendings
+UPDATE loans
 SET counterparty = $2, description = $3, amount = $4,
-    collected_amount = $5, occurred_on = $6, updated_at = now()
+    settled_amount = $5, occurred_on = $6, updated_at = now()
 WHERE id = $1;
 
 -- name: DeleteLending :exec
-DELETE FROM lendings WHERE id = $1;
+DELETE FROM loans WHERE id = $1;
 ```
 
 ### 5.3 wishes.sql
@@ -865,7 +885,8 @@ VALUES ($1, $2, $3, $4, $5, $6);
     "commitments": 80000
   },
   "investmentTotal": 350000,
-  "outstandingLendings": 12000,
+  "outstandingLent": 12000,
+  "outstandingBorrowed": 5000,
   "averageSurplus": 65000,
   "hasAverageSurplus": true,
   "wishes": [
@@ -905,33 +926,36 @@ VALUES ($1, $2, $3, $4, $5, $6);
 
 口座に紐づく取引が存在する場合、DELETE は 422 を返す（DDL の `ON DELETE RESTRICT` による）。
 
-### 6.3 立替
+### 6.3 貸し借り
 
 | メソッド | パス | ボディ | 成功 |
 | --- | --- | --- | --- |
-| GET | `/api/lendings?outstanding=true` | — | 200 配列 |
-| POST | `/api/lendings` | `{counterparty, description, amount, occurredOn}` | 201 |
-| POST | `/api/lendings/{id}/collect` | `{amount}` | 200 |
-| DELETE | `/api/lendings/{id}` | — | 204 |
+| GET | `/api/loans?outstanding=true` | — | 200 配列 |
+| POST | `/api/loans` | `{direction, counterparty, description, amount, occurredOn}` | 201 |
+| POST | `/api/loans/{id}/settle` | `{amount}` | 200 |
+| DELETE | `/api/loans/{id}` | — | 204 |
 
-> **2026-07-30 の変更：** POST から `accountId`、collect から `accountId` と `occurredOn` が消えた。**送ると 400 を返す。** 黙って無視すると「口座を指定したのに残高が変わらない」と読めるため。立替は口座残高を動かさない。
+> **2026-07-30 の変更：** POST から `accountId`、精算から `accountId` と `occurredOn` が消えた。**送ると 400 を返す。** 黙って無視すると「口座を指定したのに残高が変わらない」と読めるため。貸し借りは口座残高を動かさない。
+>
+> あわせて `direction`（`'lent'` / `'borrowed'`）を必須にし、精算の経路を `/collect` から `/settle` に改めた。**向きごとに経路を分けない。** domain の処理はどちらも同じで、分ければ「`lent` に `/repay` を投げたら 422 か」という判定が新たに要る。**`direction` の妥当性は domain が判定するため 422**（`INVALID_LOAN_DIRECTION`）で、400 ではない。
 
-レスポンスの立替オブジェクトには、導出値も含める。
+レスポンスの貸し借りオブジェクトには、導出値も含める。
 
 ```json
 {
   "id": "...",
+  "direction": "lent",
   "counterparty": "テスト相手",
   "description": "◯◯のライブチケット代",
   "amount": 12000,
-  "collectedAmount": 5000,
+  "settledAmount": 5000,
   "outstanding": 7000,
   "status": "partial",
   "occurredOn": "2026-07-12"
 }
 ```
 
-回収額が未回収残高を超える場合は 422（`COLLECT_EXCEEDS_OUTSTANDING`）。
+精算額が未精算残高を超える場合は 422（`SETTLE_EXCEEDS_OUTSTANDING`）。
 
 ### 6.4 ウィッシュ
 
@@ -1001,17 +1025,21 @@ VALUES ($1, $2, $3, $4, $5, $6);
 
 **A-2、A-7、A-8、A-9 が最重要。** ここが壊れるとアプリの存在意義が消える。
 
-#### A'. CalculateOutstandingLendings
+#### A'. CalculateOutstandingLoans
 
-> **2026-07-30 の変更で分離した。** A-3〜A-5 は `CalculateBreakdown` のケースだったが、立替が実質資産に関与しなくなったためこちらへ移した。**いずれも `netAsset` は動かない**ことを併せて確認する。
+> **2026-07-30 の変更で分離した。** A-3〜A-5 は `CalculateBreakdown` のケースだったが、貸し借りが実質資産に関与しなくなったためこちらへ移した。**いずれも `netAsset` は動かない**ことを併せて確認する。
 
-| # | 入力 | 期待 |
+| # | 入力 | 期待（lent / borrowed） |
 | --- | --- | --- |
-| A-3 | 未回収立替 12,000（回収0） | 12,000 |
-| A-4 | 立替 12,000 のうち 5,000 回収済 | 7,000 |
-| A-5 | 立替 12,000 全額回収済 | 0 |
-| A-12 | 立替 12,000（回収0）と 8,000（3,000 回収済） | 17,000 |
-| A-13 | 空（nil スライス） | 0 |
+| A-3 | 貸した 12,000（精算0） | 12,000 / 0 |
+| A-4 | 貸した 12,000 のうち 5,000 精算済 | 7,000 / 0 |
+| A-5 | 貸した 12,000 全額精算済 | 0 / 0 |
+| A-12 | 貸した 12,000（精算0）と 8,000（3,000 精算済） | 17,000 / 0 |
+| A-13 | 空（nil スライス） | 0 / 0 |
+| A-14 | 借りた 5,000（精算0） | 0 / 5,000 |
+| A-15 | 貸した 12,000 と 借りた 5,000（1,000 精算済） | 12,000 / 4,000 |
+
+**A-15 が重要。** 差額（8,000）に丸めていないことを見る。
 
 #### B. AverageSurplus
 
@@ -1070,17 +1098,28 @@ C-1 と C-2 のペアが切り上げ実装の正しさを担保する。**両方
 
 **エラー時に状態が変化していないことも検証する。** 遷移に失敗したのに状態だけ書き換わっていると、最も気づきにくい不具合になる。
 
-### 7.4 lending_test.go のケース
+### 7.4 loan_test.go のケース
 
-| # | amount | collected | 操作 | 期待 |
+**下の表は `lent` と `borrowed` の両方に対して流す。** 精算の計算は向きによらず同じであることを、同じ表を2周させて確認する。向きで分岐した実装なら片方で落ちる。
+
+| # | amount | settled | 操作 | 期待 |
 | --- | --- | --- | --- | --- |
-| F-1 | 12,000 | 0 | Collect(5,000) | collected=5,000、status=partial |
-| F-2 | 12,000 | 5,000 | Collect(7,000) | collected=12,000、status=collected |
-| F-3 | 12,000 | 5,000 | Collect(8,000) | **ErrCollectExceedsOutstanding**、collected は 5,000 のまま |
-| F-4 | 12,000 | 12,000 | Collect(1) | ErrCollectExceedsOutstanding |
-| F-5 | 12,000 | 0 | Collect(0) | ErrInvalidAmount |
-| F-6 | 12,000 | 0 | Collect(-100) | ErrInvalidAmount |
-| F-7 | 12,000 | 0 | Outstanding() | 12,000、status=uncollected |
+| F-1 | 12,000 | 0 | Settle(5,000) | settled=5,000、status=partial |
+| F-2 | 12,000 | 5,000 | Settle(7,000) | settled=12,000、status=settled |
+| F-3 | 12,000 | 5,000 | Settle(8,000) | **ErrSettleExceedsOutstanding**、settled は 5,000 のまま |
+| F-4 | 12,000 | 12,000 | Settle(1) | ErrSettleExceedsOutstanding |
+| F-5 | 12,000 | 0 | Settle(0) | ErrInvalidAmount |
+| F-6 | 12,000 | 0 | Settle(-100) | ErrInvalidAmount |
+| F-7 | 12,000 | 0 | Outstanding() | 12,000、status=unsettled |
+
+向きそのものの検証（2026-07-30 で追加）：
+
+| # | ケース | 期待 |
+| --- | --- | --- |
+| F-8 | 借りた 5,000（2,000 精算済）の Amount と Outstanding | 5,000 と 3,000。**借りた側も正の値** |
+| F-9 | NewLoan に不正な向きを渡す | ErrInvalidLoanDirection |
+| F-10 | DB から不正な向きの行を復元する | ErrInvalidLoanDirection。CHECK 制約をすり抜けた値を止める最後の関門 |
+| F-11 | Settle の前後で Direction を確認 | 変化しない。動くと貸しと借りが入れ替わる |
 
 ### 7.5 year_month_test.go のケース
 
@@ -1102,15 +1141,15 @@ C-1 と C-2 のペアが切り上げ実装の正しさを担保する。**両方
 
 | # | ケース | 期待 |
 | --- | --- | --- |
-| H-1 | CollectLending 正常系 | 立替の回収額だけが更新される |
-| H-2 | CollectLending で過回収 | エラーを返し、回収額が変化しない |
+| H-1 | SettleLoan 正常系 | 貸し借りの精算額だけが更新される |
+| H-2 | SettleLoan で過精算 | エラーを返し、精算額が変化しない |
 | H-3 | PayWish 正常系の前後で実質資産を比較 | **支払い前後で実質資産が変わらない**（確定支出が消え、同額だけ残高が減るため） |
 | H-4 | PayWish を considering のウィッシュに対して実行 | ErrInvalidTransition、副作用なし |
 | H-5 | GetDashboard で done / dropped のウィッシュ | レスポンスに含まれない |
-| H-6 | CreateLending / CollectLending の前後で口座残高と取引履歴を確認 | **どちらも変化しない**（2026-07-30 の変更） |
-| H-7 | CollectLending の途中で別の回収が入る | ConflictError（409）。回収額は先に入った側の値のまま |
+| H-6 | CreateLoan / SettleLoan の前後で口座残高と取引履歴を確認 | **どちらも変化しない**（2026-07-30 の変更） |
+| H-7 | SettleLoan の途中で別の精算が入る | ConflictError（409）。精算額は先に入った側の値のまま |
 
-**H-3、H-6、H-7 が重要。** H-3 は状態遷移と残高更新の整合性、H-6 は立替が口座から切り離されていること（不変条件4）、H-7 は楽観ロックが過回収を防いでいることの検証にあたる。
+**H-3、H-6、H-7 が重要。** H-3 は状態遷移と残高更新の整合性、H-6 は貸し借りが口座から切り離されていること（不変条件4）、H-7 は楽観ロックが過精算を防いでいることの検証にあたる。
 
 > **2026-07-30 の変更：** H-1・H-2 から口座残高と取引履歴の検証を外し、代わりに「触っていないこと」を見る H-6 を足した。**変更前は「3つがすべて更新される」ことが正しさの基準だった。**
 
@@ -1128,7 +1167,7 @@ docs/     ドキュメントのみ
 chore/    設定・依存・雑務
 ```
 
-例：`feat/domain-networth`、`fix/collect-overflow`、`docs/detailed-design`
+例：`feat/domain-networth`、`fix/settle-overflow`、`docs/detailed-design`
 
 `main` へは PR 経由のみ。直接 push は禁止（ブランチ保護で強制）。
 
@@ -1138,7 +1177,7 @@ chore/    設定・依存・雑務
 
 ```
 feat: 実質資産の計算関数を追加
-fix: 立替の過回収チェックが境界値で通っていた問題を修正
+fix: 貸し借りの過精算チェックが境界値で通っていた問題を修正
 docs: 詳細設計書を追加
 ```
 
@@ -1153,7 +1192,7 @@ docs: 詳細設計書を追加
 | 実質資産 | `NetAsset` | `TotalAsset`、`RealAsset` |
 | 月間余剰 | `Surplus` | `Balance`、`Diff` |
 | 不足額 | `Shortfall` | `Remaining`、`Gap` |
-| 未回収残高 | `Outstanding` | `Unpaid`、`Rest` |
+| 未精算残高 | `Outstanding` | `Unpaid`、`Rest` |
 | 確定支出 | `Commitment` | `Fixed`、`Planned` |
 | 月次収支 | `MonthlyBalance` | `MonthlyPlan`、`Budget` |
 
@@ -1169,7 +1208,7 @@ docs: 詳細設計書を追加
 | 2 | `money.go` | なし |
 | 3 | `year_month.go` | errors |
 | 4 | `account.go` | money, errors |
-| 5 | `lending.go` | money, errors |
+| 5 | `loan.go` | money, errors |
 | 6 | `wish.go` | money, errors |
 | 7 | `monthly_balance.go` | money, year_month, errors |
 | 8 | `networth.go` | 上記すべて |

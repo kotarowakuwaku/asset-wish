@@ -1,5 +1,5 @@
 import type { Account } from './account'
-import type { Lending } from './lending'
+import type { Loan } from './loan'
 import { addMoney, isPositiveMoney, subMoney, ZERO_MONEY, type Money } from './money'
 import type { MonthlyBalance } from './monthlyBalance'
 import type { Wish } from './wish'
@@ -12,7 +12,7 @@ export const AVERAGE_SURPLUS_MONTHS = 3
  * 実質資産の内訳。
  * ダッシュボードで内訳表示するため、合計値だけでなく構成要素も保持する。
  *
- * **未回収の立替はここに入れない。** 立替は実質資産の外の参考値になった
+ * **未精算の貸し借りはここに入れない。** 貸し借りは実質資産の外の参考値になった
  * （不変条件4）。この型に持たせたまま netAsset() で無視すると、「内訳に
  * あるのに合計に入っていない項目」ができ、あとから足し戻されうる。
  * 全フィールドを必ず使う形にしておけば、その事故が起こらない。
@@ -41,9 +41,9 @@ export function netAsset(b: NetAssetBreakdown): Money {
  *   - kind が investment の口座は cashTotal に含めない（不変条件1）
  *   - status が committed 以外のウィッシュは commitments に含めない（不変条件3）
  *
- * 立替を受け取らないのは、実質資産に一切関与しなくなったため。引数に残すと
+ * 貸し借りを受け取らないのは、実質資産に一切関与しなくなったため。引数に残すと
  * 「使わない引数」ができ、読む側が関与を疑う。参考値は
- * calculateOutstandingLendings が別に出す。
+ * calculateOutstandingLoans が別に出す。
  */
 export function calculateBreakdown(
   accounts: readonly Account[],
@@ -74,20 +74,35 @@ export function calculateInvestmentTotal(accounts: readonly Account[]): Money {
   return total
 }
 
+/** 未精算残高を向きごとに分けた合計。 */
+export type OutstandingLoans = {
+  /** 貸していて、まだ返ってきていない額。 */
+  lent: Money
+  /** 借りていて、まだ返していない額。 */
+  borrowed: Money
+}
+
 /**
- * 未回収の立替の合計を返す。
+ * 未精算の貸し借りを向きごとに合計して返す。
  *
  * **実質資産には含めない。投資資産と同じ、別枠の参考値である（不変条件4）。**
  * 立て替えた時点で現金が出たとは限らない（カード払いなら引き落としはまだ）。
- * 「立替 ＝ 現金が出た」と決め打ちできないため、残高にも実質資産にも触らせず、
- * 「相手から返ってくる予定の額」として横に置くだけにする。
+ * 「貸した ＝ 現金が出た」と決め打ちできないため、残高にも実質資産にも触らせず、
+ * 「返ってくる／返す予定の額」として横に置くだけにする。
+ *
+ * **差額にまとめない。** 貸しと借りを引き算すると、誰にいくら貸しているのかが
+ * 消える。どちらも正の値で持ち、表示側が2行に並べる。
  */
-export function calculateOutstandingLendings(lendings: readonly Lending[]): Money {
-  let total = ZERO_MONEY
-  for (const l of lendings) {
-    total = addMoney(total, l.outstanding())
+export function calculateOutstandingLoans(loans: readonly Loan[]): OutstandingLoans {
+  let lent = ZERO_MONEY
+  let borrowed = ZERO_MONEY
+
+  for (const l of loans) {
+    if (l.direction === 'lent') lent = addMoney(lent, l.outstanding())
+    else borrowed = addMoney(borrowed, l.outstanding())
   }
-  return total
+
+  return { lent, borrowed }
 }
 
 /**

@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 export const routes = [
   { path: 'dashboard', label: 'ダッシュボード' },
   { path: 'accounts', label: '口座' },
-  { path: 'lendings', label: '立替' },
+  { path: 'loans', label: '貸し借り' },
   { path: 'wishes', label: 'ウィッシュ' },
   { path: 'monthly-balances', label: '月次収支' },
 ] as const

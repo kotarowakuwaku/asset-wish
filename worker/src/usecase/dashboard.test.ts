@@ -4,7 +4,7 @@ import { instantOf, isoDateOf, SOME_DATE, SOME_INSTANT, yen } from '../../test/s
 
 const NOW = instantOf('2026-07-29T00:00:00Z')
 import { Account, type AccountKind } from '../domain/account'
-import { Lending } from '../domain/lending'
+import { Loan, type LoanDirection } from '../domain/loan'
 import { MonthlyBalance } from '../domain/monthlyBalance'
 import { Wish, type WishStatus } from '../domain/wish'
 import { YearMonth } from '../domain/yearMonth'
@@ -19,7 +19,7 @@ beforeEach(() => {
   seq = 0
   usecase = new DashboardUsecase(
     fakes.accounts,
-    fakes.lendings,
+    fakes.loans,
     fakes.wishes,
     fakes.balances,
     fixedClock(NOW),
@@ -32,9 +32,9 @@ function seedAccount(kind: AccountKind, balance: number): void {
   fakes.accounts.seed(Account.create(nextId(), 'テスト口座', kind, yen(balance), SOME_INSTANT))
 }
 
-function seedLending(amount: number, collected: number): void {
-  fakes.lendings.seed(
-    Lending.restore(nextId(), 'テスト相手', '', yen(amount), yen(collected), SOME_DATE),
+function seedLoan(direction: LoanDirection, amount: number, settled: number): void {
+  fakes.loans.seed(
+    Loan.restore(nextId(), direction, 'テスト相手', '', yen(amount), yen(settled), SOME_DATE),
   )
 }
 
@@ -85,21 +85,36 @@ describe('実質資産', () => {
     expect(d.investmentTotal).toBe(350_000)
   })
 
-  it('立替は実質資産に入らず、別枠で返る（不変条件4）', async () => {
+  it('貸し借りは実質資産に入らず、別枠で返る（不変条件4）', async () => {
     seedAccount('cash', 500_000)
-    seedLending(12_000, 0)
+    seedLoan('lent', 12_000, 0)
+    seedLoan('borrowed', 5_000, 0)
 
     const d = await usecase.get()
 
+    // 貸しも借りも実質資産を動かさない。
     expect(d.netAsset).toBe(500_000)
-    expect(d.outstandingLendings).toBe(12_000)
+    expect(d.outstanding.lent).toBe(12_000)
+    expect(d.outstanding.borrowed).toBe(5_000)
   })
 
-  it('回収済みの立替は参考値にも足さない', async () => {
-    seedAccount('cash', 500_000)
-    seedLending(12_000, 12_000)
+  // 差額にすると、誰にいくら貸しているのかが消える。
+  it('貸しと借りを混ぜず、向きごとに合計する', async () => {
+    seedLoan('lent', 12_000, 2_000)
+    seedLoan('lent', 3_000, 0)
+    seedLoan('borrowed', 5_000, 1_000)
 
-    expect((await usecase.get()).outstandingLendings).toBe(0)
+    const d = await usecase.get()
+
+    expect(d.outstanding.lent).toBe(13_000)
+    expect(d.outstanding.borrowed).toBe(4_000)
+  })
+
+  it('精算済みの貸し借りは参考値にも足さない', async () => {
+    seedAccount('cash', 500_000)
+    seedLoan('lent', 12_000, 12_000)
+
+    expect((await usecase.get()).outstanding.lent).toBe(0)
   })
 
   it('確定以外のウィッシュは控除しない（不変条件3）', async () => {
@@ -115,7 +130,7 @@ describe('実質資産', () => {
     const d = await usecase.get()
     expect(d.netAsset).toBe(0)
     expect(d.investmentTotal).toBe(0)
-    expect(d.outstandingLendings).toBe(0)
+    expect(d.outstanding).toEqual({ lent: 0, borrowed: 0 })
     expect(d.wishes).toEqual([])
   })
 })

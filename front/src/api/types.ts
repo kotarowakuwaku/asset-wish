@@ -18,17 +18,22 @@ export type Account = {
   isStale: boolean
 }
 
-export type CollectionStatus = 'uncollected' | 'partial' | 'collected'
+export type SettlementStatus = 'unsettled' | 'partial' | 'settled'
 
-export type Lending = {
+/** 貸した / 借りた。金額は向きによらず正で、向きはこれだけが表す。 */
+export type LoanDirection = 'lent' | 'borrowed'
+
+export type Loan = {
   id: string
+  direction: LoanDirection
   counterparty: string
   description: string
+  /** 向きによらず正の値。負の金額で「借りた」を表さない。 */
   amount: number
-  collectedAmount: number
-  /** 未回収残高。amount - collectedAmount の導出値。 */
+  settledAmount: number
+  /** 未精算残高。amount - settledAmount の導出値。 */
   outstanding: number
-  status: CollectionStatus
+  status: SettlementStatus
   /** YYYY-MM-DD */
   occurredOn: string
 }
@@ -92,10 +97,14 @@ export type Dashboard = {
   /** 投資は実質資産に含めない別枠の参考値。 */
   investmentTotal: number
   /**
-   * 未回収の立替。**これも実質資産には含めない別枠の参考値。**
+   * 未精算の貸し借り。**これも実質資産には含めない別枠の参考値。**
    * 立て替えた時点で現金が出たとは限らないため（カード払い）。
+   *
+   * 貸しと借りは分かれて届く。差額に丸めると、誰にいくら貸しているのかが
+   * 消えるため。どちらも正の値。
    */
-  outstandingLendings: number
+  outstandingLent: number
+  outstandingBorrowed: number
   averageSurplus: number
   /** false のとき averageSurplus は 0 が入るが、表示してはいけない。 */
   hasAverageSurplus: boolean

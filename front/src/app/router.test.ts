@@ -5,7 +5,7 @@ describe('parseHash', () => {
   it.each([
     ['#/dashboard', 'dashboard'],
     ['#/accounts', 'accounts'],
-    ['#/lendings', 'lendings'],
+    ['#/loans', 'loans'],
     ['#/wishes', 'wishes'],
     ['#/monthly-balances', 'monthly-balances'],
     ['#accounts', 'accounts'],
@@ -27,7 +27,7 @@ describe('routes', () => {
     expect(routes.map((r) => r.path)).toEqual([
       'dashboard',
       'accounts',
-      'lendings',
+      'loans',
       'wishes',
       'monthly-balances',
     ])

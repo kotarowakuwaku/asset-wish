@@ -5,7 +5,7 @@
 // usecase のテストが見る。
 
 import type { Account, AccountKind } from '../../domain/account'
-import type { Lending } from '../../domain/lending'
+import type { Loan, LoanDirection } from '../../domain/loan'
 import type { Money } from '../../domain/money'
 import type { MonthlyBalance } from '../../domain/monthlyBalance'
 import type { IsoDate } from '../../domain/time'
@@ -24,17 +24,18 @@ export type AccountService = {
   delete(id: string): Promise<void>
 }
 
-// 立替は口座を触らないため accountId を受け取らない（不変条件4）。
-// 回収日も受け取らない。記録する先が無い（取引履歴が作られない）。
-export type LendingService = {
-  list(outstandingOnly: boolean): Promise<Lending[]>
+// 貸し借りは口座を触らないため accountId を受け取らない（不変条件4）。
+// 精算日も受け取らない。記録する先が無い（取引履歴が作られない）。
+export type LoanService = {
+  list(outstandingOnly: boolean): Promise<Loan[]>
   create(
+    direction: LoanDirection,
     counterparty: string,
     description: string,
     amount: Money,
     occurredOn: IsoDate,
-  ): Promise<Lending>
-  collect(lendingId: string, amount: Money): Promise<Lending>
+  ): Promise<Loan>
+  settle(loanId: string, amount: Money): Promise<Loan>
   delete(id: string): Promise<void>
 }
 
@@ -69,7 +70,7 @@ export type DashboardService = {
 
 export type Deps = {
   accounts: AccountService
-  lendings: LendingService
+  loans: LoanService
   wishes: WishService
   balances: MonthlyBalanceService
   transactions: TransactionService

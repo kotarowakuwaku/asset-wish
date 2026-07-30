@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { countRows, db, givenAccount, givenLending, givenWish, rawBalance, resetDb } from '../../../test/db'
+import { countRows, db, givenAccount, givenLoan, givenWish, rawBalance, resetDb } from '../../../test/db'
 import { id, instantOf, SOME_DATE, yen } from '../../../test/support'
-import { Lending } from '../../domain/lending'
+import { Loan } from '../../domain/loan'
 import { Transaction } from '../../domain/transaction'
 import { isConflictError, type WriteOperation } from '../../usecase/port'
 import { D1AtomicWriter } from './writer'
@@ -21,15 +21,15 @@ async function expectConflict(ops: readonly WriteOperation[]): Promise<void> {
   expect.fail('ConflictError を期待したが、何も投げられなかった')
 }
 
-describe('立替の作成（口座残高の減算と履歴を伴う）', () => {
+describe('貸し借りの作成（口座残高の減算と履歴を伴う）', () => {
   it('前提が満たされていれば3件すべて書かれる', async () => {
     const account = await givenAccount({ balance: 500_000 })
     const before = account.balance
-    const lending = Lending.create(id(), 'テスト相手', '', yen(12_000), SOME_DATE)
+    const loan = Loan.create(id(), 'lent', 'テスト相手', '', yen(12_000), SOME_DATE)
     account.applyDelta(yen(-12_000), LATER)
 
     await writer.writeAll([
-      { kind: 'createLending', lending },
+      { kind: 'createLoan', loan },
       { kind: 'updateAccount', account, expectedBalance: before },
       {
         kind: 'createTransaction',
@@ -38,27 +38,27 @@ describe('立替の作成（口座残高の減算と履歴を伴う）', () => {
           account.id,
           yen(-12_000),
           'lending_created',
-          lending.id,
+          loan.id,
           SOME_DATE,
         ),
       },
     ])
 
     expect(await rawBalance(account.id)).toBe(488_000)
-    expect(await countRows('lendings')).toBe(1)
+    expect(await countRows('loans')).toBe(1)
     expect(await countRows('transactions')).toBe(1)
   })
 
   // ここが案 A の肝。素朴に条件付き UPDATE を並べるだけだと、
-  // 更新0件でも後続の INSERT が実行され、立替だけが増える。
+  // 更新0件でも後続の INSERT が実行され、貸し借りだけが増える。
   it('残高が読み取り時と違えば ConflictError になり、1件も書かれない', async () => {
     const account = await givenAccount({ balance: 500_000 })
     const staleBalance = yen(499_999) // 別の操作が先に残高を動かした状況
-    const lending = Lending.create(id(), 'テスト相手', '', yen(12_000), SOME_DATE)
+    const loan = Loan.create(id(), 'lent', 'テスト相手', '', yen(12_000), SOME_DATE)
     account.applyDelta(yen(-12_000), LATER)
 
     await expectConflict([
-      { kind: 'createLending', lending },
+      { kind: 'createLoan', loan },
       { kind: 'updateAccount', account, expectedBalance: staleBalance },
       {
         kind: 'createTransaction',
@@ -67,29 +67,29 @@ describe('立替の作成（口座残高の減算と履歴を伴う）', () => {
           account.id,
           yen(-12_000),
           'lending_created',
-          lending.id,
+          loan.id,
           SOME_DATE,
         ),
       },
     ])
 
     expect(await rawBalance(account.id)).toBe(500_000)
-    expect(await countRows('lendings')).toBe(0)
+    expect(await countRows('loans')).toBe(0)
     expect(await countRows('transactions')).toBe(0)
   })
 })
 
-describe('立替の回収（前提条件が2つある）', () => {
+describe('貸し借りの精算（前提条件が2つある）', () => {
   async function ops(
-    expectedCollected: number,
+    expectedSettled: number,
     expectedBalance: number,
   ): Promise<readonly WriteOperation[]> {
     const account = await givenAccount({ balance: 500_000 })
-    const lending = await givenLending({ amount: 12_000, collected: 0 })
-    lending.collect(yen(5_000))
+    const loan = await givenLoan({ amount: 12_000, settled: 0 })
+    loan.settle(yen(5_000))
     account.applyDelta(yen(5_000), LATER)
     return [
-      { kind: 'updateLendingCollected', lending, expectedCollectedAmount: yen(expectedCollected) },
+      { kind: 'updateLoanSettled', loan, expectedSettledAmount: yen(expectedSettled) },
       { kind: 'updateAccount', account, expectedBalance: yen(expectedBalance) },
       {
         kind: 'createTransaction',
@@ -98,7 +98,7 @@ describe('立替の回収（前提条件が2つある）', () => {
           account.id,
           yen(5_000),
           'lending_collected',
-          lending.id,
+          loan.id,
           SOME_DATE,
         ),
       },
@@ -108,17 +108,17 @@ describe('立替の回収（前提条件が2つある）', () => {
   it('両方の前提が満たされていれば3件すべて書かれる', async () => {
     await writer.writeAll(await ops(0, 500_000))
 
-    const l = await db.prepare('SELECT collected_amount AS c FROM lendings').first<{ c: number }>()
+    const l = await db.prepare('SELECT settled_amount AS c FROM loans').first<{ c: number }>()
     expect(l?.c).toBe(5_000)
     const row = await db.prepare('SELECT balance FROM accounts').first<{ balance: number }>()
     expect(row?.balance).toBe(505_000)
     expect(await countRows('transactions')).toBe(1)
   })
 
-  it('回収額の前提だけ食い違っても1件も書かれない', async () => {
+  it('精算額の前提だけ食い違っても1件も書かれない', async () => {
     await expectConflict(await ops(3_000, 500_000))
 
-    const l = await db.prepare('SELECT collected_amount AS c FROM lendings').first<{ c: number }>()
+    const l = await db.prepare('SELECT settled_amount AS c FROM loans').first<{ c: number }>()
     expect(l?.c).toBe(0)
     const row = await db.prepare('SELECT balance FROM accounts').first<{ balance: number }>()
     expect(row?.balance).toBe(500_000)
@@ -130,7 +130,7 @@ describe('立替の回収（前提条件が2つある）', () => {
   it('残高の前提だけ食い違っても1件も書かれない', async () => {
     await expectConflict(await ops(0, 499_999))
 
-    const l = await db.prepare('SELECT collected_amount AS c FROM lendings').first<{ c: number }>()
+    const l = await db.prepare('SELECT settled_amount AS c FROM loans').first<{ c: number }>()
     expect(l?.c).toBe(0)
     const row = await db.prepare('SELECT balance FROM accounts').first<{ balance: number }>()
     expect(row?.balance).toBe(500_000)
@@ -186,9 +186,9 @@ describe('ウィッシュの支払い（状態の前提）', () => {
 describe('前提条件が無い場合', () => {
   it('番人を置かずにそのまま流す', async () => {
     const account = await givenAccount()
-    const lending = Lending.create(id(), 'テスト相手', '', yen(12_000), SOME_DATE)
+    const loan = Loan.create(id(), 'lent', 'テスト相手', '', yen(12_000), SOME_DATE)
     await writer.writeAll([
-      { kind: 'createLending', lending },
+      { kind: 'createLoan', loan },
       {
         kind: 'createTransaction',
         transaction: Transaction.create(
@@ -196,17 +196,17 @@ describe('前提条件が無い場合', () => {
           account.id,
           yen(-12_000),
           'lending_created',
-          lending.id,
+          loan.id,
           SOME_DATE,
         ),
       },
     ])
-    expect(await countRows('lendings')).toBe(1)
+    expect(await countRows('loans')).toBe(1)
     expect(await countRows('transactions')).toBe(1)
   })
 
   it('空なら何もしない', async () => {
     await writer.writeAll([])
-    expect(await countRows('lendings')).toBe(0)
+    expect(await countRows('loans')).toBe(0)
   })
 })

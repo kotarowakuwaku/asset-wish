@@ -6,7 +6,7 @@
 
 import type { Deps } from '../src/adapter/handler/services'
 import { Account } from '../src/domain/account'
-import { Lending } from '../src/domain/lending'
+import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money } from '../src/domain/money'
 import { MonthlyBalance } from '../src/domain/monthlyBalance'
 import { Transaction } from '../src/domain/transaction'
@@ -30,13 +30,16 @@ export function anAccount(overrides: { balance?: number; kind?: 'cash' | 'invest
   )
 }
 
-export function aLending(overrides: { amount?: number; collected?: number } = {}): Lending {
-  return Lending.restore(
+export function aLoan(
+  overrides: { direction?: LoanDirection; amount?: number; settled?: number } = {},
+): Loan {
+  return Loan.restore(
     TEST_ID,
+    overrides.direction ?? 'lent',
     'テスト相手',
     'メモ',
     yen(overrides.amount ?? 12_000),
-    yen(overrides.collected ?? 5_000),
+    yen(overrides.settled ?? 5_000),
     SOME_DATE,
   )
 }
@@ -65,7 +68,7 @@ export function aDashboard(): Dashboard {
     breakdown: { cashTotal: yen(910_000), commitments: yen(80_000) },
     netAsset: yen(830_000),
     investmentTotal: yen(350_000),
-    outstandingLendings: yen(12_000),
+    outstanding: { lent: yen(12_000), borrowed: yen(5_000) },
     averageSurplus: yen(60_000),
     wishes: [
       { wish: aWish(), shortfall: yen(358_000), monthsToReach: 6, monthlySavingNeeded: yen(59_667) },
@@ -98,11 +101,11 @@ export function stubDeps(overrides: Partial<Deps> = {}): Deps & { calls: Calls }
       update: record('accounts.update', () => anAccount()),
       delete: record('accounts.delete', () => undefined),
     },
-    lendings: {
-      list: record('lendings.list', () => [aLending()]),
-      create: record('lendings.create', () => aLending()),
-      collect: record('lendings.collect', () => aLending()),
-      delete: record('lendings.delete', () => undefined),
+    loans: {
+      list: record('loans.list', () => [aLoan()]),
+      create: record('loans.create', () => aLoan()),
+      settle: record('loans.settle', () => aLoan()),
+      delete: record('loans.delete', () => undefined),
     },
     wishes: {
       list: record('wishes.list', () => [aWish()]),

@@ -2,7 +2,8 @@ import type {
   Account,
   AccountKind,
   Dashboard,
-  Lending,
+  Loan,
+  LoanDirection,
   MonthlyBalance,
   Transaction,
   Wish,
@@ -129,22 +130,24 @@ export function createClient(token: string) {
       patch<Account>(`/api/accounts/${id}`, input),
     deleteAccount: (id: string) => del(`/api/accounts/${id}`),
 
-    listLendings: (outstandingOnly: boolean) =>
-      get<Lending[]>(
-        `/api/lendings${outstandingOnly ? '?outstanding=true' : ''}`,
+    listLoans: (outstandingOnly: boolean) =>
+      get<Loan[]>(
+        `/api/loans${outstandingOnly ? '?outstanding=true' : ''}`,
       ),
-    // accountId は送れない。立替は口座残高を動かさない（不変条件4）。
+    // accountId は送れない。貸し借りは口座残高を動かさない（不変条件4）。
     // 送るとサーバーが 400 を返す。
-    createLending: (input: {
+    createLoan: (input: {
+      direction: LoanDirection
       counterparty: string
       description: string
+      /** 向きによらず正の値。符号で「借りた」を表さない。 */
       amount: number
       occurredOn: string
-    }) => post<Lending>('/api/lendings', input),
-    // 回収日も送れない。口座を触らないので取引履歴が作られず、残す先が無い。
-    collectLending: (id: string, input: { amount: number }) =>
-      post<Lending>(`/api/lendings/${id}/collect`, input),
-    deleteLending: (id: string) => del(`/api/lendings/${id}`),
+    }) => post<Loan>('/api/loans', input),
+    // 精算日も送れない。口座を触らないので取引履歴が作られず、残す先が無い。
+    settleLoan: (id: string, input: { amount: number }) =>
+      post<Loan>(`/api/loans/${id}/settle`, input),
+    deleteLoan: (id: string) => del(`/api/loans/${id}`),
 
     listWishes: (status?: WishStatus) =>
       get<Wish[]>(`/api/wishes${status ? `?status=${status}` : ''}`),
@@ -187,8 +190,8 @@ export type ApiClient = ReturnType<typeof createClient>
 /**
  * errorMessage は例外を表示用の文字列にする。
  *
- * 業務ルール違反（422）はサーバーの文言をそのまま出す。「回収額が
- * 未回収残高を超えています」のように、読んで意味が通る文言が返るため
+ * 業務ルール違反（422）はサーバーの文言をそのまま出す。「精算額が
+ * 未精算残高を超えています」のように、読んで意味が通る文言が返るため
  * front で言い換えない。
  */
 export function errorMessage(e: unknown): string {

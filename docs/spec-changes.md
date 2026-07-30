@@ -2,13 +2,13 @@
 
 本番に配置したあと実際に使い、**肌感と合わなかった点**をまとめたもの。要望の一覧ではなく、**決定と、その理由と、残っている論点**を残す。
 
-**状態：1本目と2本目の前半が完了。**
+**状態：1本目と2本目が完了。**
 
 | # | 内容 | 状態 |
 | --- | --- | --- |
 | 1 | 投資欄を消す／期限までに毎月いくら | **完了**（ブランチ `feat/dashboard-tweaks`） |
 | 2a | 立替を口座から切り離す | **完了**（ブランチ `feat/lending-off-balance`）。要件定義書は v1.1 に更新済み |
-| 2b | 貸す・借りるの両方を登録できるようにする | 未着手。**用語を作り直す判断が付いている**（下記） |
+| 2b | 貸す・借りるの両方を登録できるようにする | **完了**（同ブランチ）。用語を `Loan` / `loans` / `settle` に作り直した |
 | 3 | 入出金の明細を打てるようにする | 未着手 |
 | 4 | 月次収支を明細から自動集計 | 未着手。3が前提 |
 | 5 | 定期入出金（給料・家賃） | 未着手。3が前提 |
@@ -75,18 +75,63 @@
 
 ### 実装した範囲
 
-- `domain/netAsset.ts`：`calculateBreakdown` が立替を引数に取らなくなった。`calculateOutstandingLendings` を追加
+- `domain/netAsset.ts`：`calculateBreakdown` が立替を引数に取らなくなった。`calculateOutstandingLendings` を追加（2b で `calculateOutstandingLoans` に改名）
 - `usecase/lending.ts`：`create` / `collect` が口座も取引履歴も触らない。`AccountRepository` と `Clock` の注入も不要になった
 - `usecase/dashboard.ts`：`Dashboard` に `outstandingLendings` を追加
 - `handler`：`POST /api/lendings` から `accountId`、`/collect` から `accountId` と `occurredOn` が消えた
 - `front`：立替画面から口座選択を外し、ダッシュボードに参考値の欄を追加
 - **マイグレーションは無し。** スキーマは変わっていない
 
-### 2b で決めること
+**2a では名前を変えていない。** `Lending` / `lendings` / `collect` のまま口座から切り離した。改名は 2b にまとめた。
 
-**用語を作り直す。** 貸す／借りるの両方を扱うなら、`Lending`（立替）という名前が「借りた金」も指すことになり、不変条件14（設計書の用語をそのままコードの名前に使う）と噛み合わなくなる。要件定義書の用語定義に上位語（`Loan` など）を足し、クラス名・テーブル名・API 名まで揃えて改名する。差分は大きいが、名前と概念がずれたまま増築するほうが高くつく。
+---
 
-「回収」は貸した側だけの語になるため、`collect` の名前も見直す対象になる。
+## 2b. 貸す・借りるの両方を登録できるようにする（完了）
+
+### 何が問題だったか
+
+**借りた金を登録する場所が無かった。** 貸した分（立替）しか扱えず、借りている額は把握できなかった。口座から切り離した（2a）ことで、向きを分けるだけで済むようになった。
+
+### 決めたこと
+
+**用語を作り直した。** `Lending`（立替）という名前が「借りた金」も指すことになり、不変条件14（設計書の用語をそのままコードの名前に使う）と噛み合わなくなる。上位語の**貸借（Loan）**を要件定義書の用語定義に足し、**クラス名・テーブル名・カラム名・API 経路・画面の文言まで揃えて改名した。**
+
+| 変更前 | 変更後 |
+| --- | --- |
+| `Lending` / `lendings` テーブル | `Loan` / `loans` テーブル |
+| `collected_amount` / `collectedAmount` | `settled_amount` / `settledAmount` |
+| `collect()` / `POST /api/lendings/{id}/collect` | `settle()` / `POST /api/loans/{id}/settle` |
+| `CollectionStatus`（`uncollected` / `collected`） | `SettlementStatus`（`unsettled` / `settled`） |
+| `COLLECT_EXCEEDS_OUTSTANDING` | `SETTLE_EXCEEDS_OUTSTANDING` |
+| 「回収」 | 「精算」（貸した側では回収、借りた側では返済） |
+
+差分は大きいが、**名前と概念がずれたまま増築するほうが高くつく。**
+
+### 着手時に決めたこと
+
+**向きは `direction` カラムで持ち、金額の符号では表さない。**
+
+負の金額で「借りた」を表すと、`amount > 0` の CHECK が借りた側に効かなくなり、金額の妥当性と向きの判定が絡み合う。向きを独立させれば、検査は両方向に同じまま効く。domain の `Loan.amount` も向きによらず常に正。
+
+**精算の経路を向きごとに分けない。** `/collect` と `/repay` に割る案も検討したが採らなかった。domain の処理はどちらも「未精算残高が減る」だけで同一なので、分けると同じ手順が2本に増える。さらに「`lent` に `/repay` を投げたら 422 か」という判定が新たに必要になる。**画面の文言だけを向きで変え、処理は1本にした。**
+
+**ダッシュボードは貸しと借りを2行で出す。** 差額（貸し 12,000 − 借り 5,000 = 7,000）に丸めると、誰にいくら貸しているのかが消える。API も `outstandingLent` / `outstandingBorrowed` に分けて返す。片方が0でも行は消さない（消えると「借りている分は無い」ことが分からない）。
+
+**マイグレーションはテーブルを作り直す形にした。** `ALTER TABLE ... RENAME` でも中身は移せるが、**名前付き CHECK 制約の名前は変わらない。** `lendings_collected_within_amount` が `loans` に残り、違反時のエラーに旧名が出続ける。制約名を変えるにはどうせ作り直しが要る。件数は年間数百件なのでコストは問題にならない。
+
+**既存行の `direction` はすべて `'lent'`。** 変更前は貸した分しか登録できなかったので、既存行は貸した側で確定している。
+
+### 実装した範囲
+
+- `migrations/0002_loans.sql`：`loans` を作り直し、`lendings` から全行を移して `DROP`
+- `domain/loan.ts`：`Loan` / `LoanDirection` / `SettlementStatus`。`settle()` は向きで分岐しない
+- `domain/netAsset.ts`：`calculateOutstandingLoans` が `{ lent, borrowed }` を返す
+- `handler`：`/api/loans`、`/settle`、`direction` の受け取り（妥当性は domain が判定するので 422）
+- `front`：登録フォームに向きの select、一覧に向きのラベル、ダッシュボードに2行
+
+### 残っている論点
+
+**相手別の合計を出すかは未決。** 要件定義書 F-05 には「相手別の合計表示」があったが、実装していない。件数が増えたら考える。
 
 ---
 
@@ -102,7 +147,7 @@
 
 ### 実装の見当
 
-- `migrations/0002`：`transactions` に `note TEXT NOT NULL DEFAULT ''` を追加
+- `migrations/0003`：`transactions` に `note TEXT NOT NULL DEFAULT ''` を追加（`0002` は 2b で使った）
 - `POST /api/transactions` / `DELETE /api/transactions/{id}`
 - 口座残高の更新と履歴の記録は原子的に行う（既存の `AtomicWriter` をそのまま使う）
 - 種別は既存の `adjustment` を使う。domain は既に対応済み

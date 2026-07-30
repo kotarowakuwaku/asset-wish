@@ -62,7 +62,8 @@ describe('GET /api/dashboard', () => {
       netAsset: 830_000,
       breakdown: { cashTotal: 910_000, commitments: 80_000 },
       investmentTotal: 350_000,
-      outstandingLendings: 12_000,
+      outstandingLent: 12_000,
+      outstandingBorrowed: 5_000,
       averageSurplus: 60_000,
       hasAverageSurplus: true,
       wishes: [
@@ -91,7 +92,7 @@ describe('GET /api/dashboard', () => {
           breakdown: { cashTotal: yen(0), commitments: yen(0) },
           netAsset: yen(0),
           investmentTotal: yen(0),
-          outstandingLendings: yen(0),
+          outstanding: { lent: yen(0), borrowed: yen(0) },
           averageSurplus: null,
           wishes: [],
         }),
@@ -170,16 +171,17 @@ describe('口座', () => {
   })
 })
 
-describe('立替', () => {
+describe('貸し借り', () => {
   it('GET は導出値を含めて返す', async () => {
-    const { body } = await call('/api/lendings')
+    const { body } = await call('/api/loans')
     expect(body).toEqual([
       {
         id: TEST_ID,
         counterparty: 'テスト相手',
+        direction: 'lent',
         description: 'メモ',
         amount: 12_000,
-        collectedAmount: 5_000,
+        settledAmount: 5_000,
         outstanding: 7_000,
         status: 'partial',
         occurredOn: '2026-07-12',
@@ -189,17 +191,18 @@ describe('立替', () => {
 
   it('?outstanding=true で絞り込みを渡す', async () => {
     const { app, deps } = makeApp()
-    await app.request('/api/lendings?outstanding=true', authed())
-    expect(deps.calls['lendings.list']).toEqual([true])
+    await app.request('/api/loans?outstanding=true', authed())
+    expect(deps.calls['loans.list']).toEqual([true])
 
-    await app.request('/api/lendings', authed())
-    expect(deps.calls['lendings.list']).toEqual([false])
+    await app.request('/api/loans', authed())
+    expect(deps.calls['loans.list']).toEqual([false])
   })
 
   it('POST は 201 を返す', async () => {
     const { status } = await call(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         description: '',
         amount: 12_000,
@@ -209,24 +212,37 @@ describe('立替', () => {
     expect(status).toBe(201)
   })
 
-  it('POST は相手・内容・金額・日付をそのまま渡す', async () => {
-    const { app, deps } = makeApp()
-    await app.request(
-      '/api/lendings',
-      jsonRequest('POST', {
-        counterparty: 'テスト相手',
-        description: 'メモ',
-        amount: 12_000,
-        occurredOn: '2026-07-12',
-      }),
-    )
-    expect(deps.calls['lendings.create']).toEqual(['テスト相手', 'メモ', 12_000, '2026-07-12'])
-  })
+  // direction の妥当性は handler で判定しない。domain に渡して 422 にさせる
+  // （不正な向きは業務ルール違反であって、本文の組み立てミスではない）。
+  it.each(['lent', 'borrowed', 'sideways'])(
+    'POST は向き・相手・内容・金額・日付をそのまま渡す（%s）',
+    async (direction) => {
+      const { app, deps } = makeApp()
+      await app.request(
+        '/api/loans',
+        jsonRequest('POST', {
+          direction,
+          counterparty: 'テスト相手',
+          description: 'メモ',
+          amount: 12_000,
+          occurredOn: '2026-07-12',
+        }),
+      )
+      expect(deps.calls['loans.create']).toEqual([
+        direction,
+        'テスト相手',
+        'メモ',
+        12_000,
+        '2026-07-12',
+      ])
+    },
+  )
 
   it('日付の形式が不正なら 400', async () => {
     const { status, body } = await call(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026/07/12',
@@ -238,8 +254,9 @@ describe('立替', () => {
 
   it('存在しない日付も 400', async () => {
     const { status } = await call(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026-02-31',
@@ -251,8 +268,9 @@ describe('立替', () => {
   // 金額に小数を渡すのは形式の誤り（400）。業務ルール違反（422）ではない。
   it('金額が小数なら 400', async () => {
     const { status, body } = await call(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 100.5,
         occurredOn: '2026-07-12',
@@ -262,12 +280,13 @@ describe('立替', () => {
     expect((body as { error: { code: string } }).error.code).toBe('INVALID_BODY')
   })
 
-  // 立替は口座残高を動かさない（不変条件4）。黙って無視すると
+  // 貸し借りは口座残高を動かさない（不変条件4）。黙って無視すると
   // 「口座を指定したのに残高が変わらない」と読める。
   it('POST で accountId を送ると 400（黙って無視しない）', async () => {
     const { status, body } = await call(
-      '/api/lendings',
+      '/api/loans',
       jsonRequest('POST', {
+        direction: 'lent',
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026-07-12',
@@ -278,21 +297,21 @@ describe('立替', () => {
     expect((body as { error: { code: string } }).error.code).toBe('INVALID_BODY')
   })
 
-  it('回収は 200 を返し、金額だけを渡す', async () => {
+  it('精算は 200 を返し、金額だけを渡す', async () => {
     const { app, deps } = makeApp()
     const res = await app.request(
-      `/api/lendings/${TEST_ID}/collect`,
+      `/api/loans/${TEST_ID}/settle`,
       jsonRequest('POST', { amount: 5_000 }),
     )
     expect(res.status).toBe(200)
-    expect(deps.calls['lendings.collect']).toEqual([TEST_ID, 5_000])
+    expect(deps.calls['loans.settle']).toEqual([TEST_ID, 5_000])
   })
 
-  // 回収日を残す先が無い（取引履歴が作られない）。
-  it('回収で accountId や occurredOn を送ると 400', async () => {
+  // 精算日を残す先が無い（取引履歴が作られない）。
+  it('精算で accountId や occurredOn を送ると 400', async () => {
     for (const extra of [{ accountId: OTHER_ID }, { occurredOn: '2026-07-12' }]) {
       const { status } = await call(
-        `/api/lendings/${TEST_ID}/collect`,
+        `/api/loans/${TEST_ID}/settle`,
         jsonRequest('POST', { amount: 5_000, ...extra }),
       )
       expect(status).toBe(400)

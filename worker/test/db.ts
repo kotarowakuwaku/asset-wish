@@ -7,12 +7,12 @@
 
 import { env } from 'cloudflare:test'
 import { Account } from '../src/domain/account'
-import { Lending } from '../src/domain/lending'
+import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money } from '../src/domain/money'
 import { Transaction } from '../src/domain/transaction'
 import { Wish } from '../src/domain/wish'
 import { insertAccountStatement } from '../src/adapter/repository/account'
-import { insertLendingStatement } from '../src/adapter/repository/lending'
+import { insertLoanStatement } from '../src/adapter/repository/loan'
 import { insertTransactionStatement } from '../src/adapter/repository/transaction'
 import { insertWishStatement } from '../src/adapter/repository/wish'
 import { id, isoDateOf, SOME_DATE, SOME_INSTANT, yen } from './support'
@@ -23,7 +23,7 @@ export const db = env.DB
 export async function resetDb(): Promise<void> {
   await db.batch([
     db.prepare('DELETE FROM transactions'),
-    db.prepare('DELETE FROM lendings'),
+    db.prepare('DELETE FROM loans'),
     db.prepare('DELETE FROM wishes'),
     db.prepare('DELETE FROM monthly_balances'),
     db.prepare('DELETE FROM accounts'),
@@ -45,19 +45,29 @@ export async function givenAccount(
   return a
 }
 
-/** 立替を1件入れて返す。collected を指定すると回収済みの状態で入る。 */
-export async function givenLending(
-  overrides: { amount?: number; collected?: number; counterparty?: string; occurredOn?: string } = {},
-): Promise<Lending> {
-  const l = Lending.restore(
+/**
+ * 貸し借りを1件入れて返す。settled を指定すると精算済みの状態で入る。
+ * direction を省くと貸した側（'lent'）になる。
+ */
+export async function givenLoan(
+  overrides: {
+    direction?: LoanDirection
+    amount?: number
+    settled?: number
+    counterparty?: string
+    occurredOn?: string
+  } = {},
+): Promise<Loan> {
+  const l = Loan.restore(
     id(),
+    overrides.direction ?? 'lent',
     overrides.counterparty ?? 'テスト相手',
     '',
     yen(overrides.amount ?? 12_000),
-    yen(overrides.collected ?? 0),
+    yen(overrides.settled ?? 0),
     overrides.occurredOn === undefined ? SOME_DATE : isoDateOf(overrides.occurredOn),
   )
-  await insertLendingStatement(db, l, false).run()
+  await insertLoanStatement(db, l, false).run()
   return l
 }
 
@@ -102,7 +112,7 @@ export async function givenTransaction(
 }
 
 /** 行数を数える。「1件も書かれていない」の検証に使う。 */
-export async function countRows(table: 'accounts' | 'lendings' | 'wishes' | 'transactions'): Promise<number> {
+export async function countRows(table: 'accounts' | 'loans' | 'wishes' | 'transactions'): Promise<number> {
   const row = await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>()
   return row?.n ?? -1
 }

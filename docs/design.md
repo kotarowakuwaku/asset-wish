@@ -16,7 +16,7 @@
 >
 > ただし、**3章のコード例は Go 版の記述**であり、実際のシグネチャは `worker/src/domain/` を見ること。移行で変わった点（`year_month` の型、時刻の持ち方、トランザクションの扱い）は `docs/migration-cloudflare.md` に集約してある。
 
-> **仕様変更について（2026-07-30）：** **立替を実質資産の計算から外した。** 実質資産は `現金・預金 − 確定支出` になり、未回収の立替は投資資産と同じ別枠の参考値になった。立替の登録・回収で口座残高は動かず、取引履歴も残らない。**この文書のうち 3.5 の計算式、4.4 のダッシュボード応答、4.4 の `/api/lendings` の入力、6.1 のテストケース表が影響を受ける**（該当箇所に注記を入れてある）。要件定義書は v1.1 が正。経緯と理由は `docs/spec-changes.md` の2章。
+> **仕様変更について（2026-07-30）：** **貸し借りを実質資産の計算から外した。** 実質資産は `現金・預金 − 確定支出` になり、未精算の貸し借りは投資資産と同じ別枠の参考値になった。貸し借りの登録・精算で口座残高は動かず、取引履歴も残らない。**この文書のうち 3.5 の計算式、4.4 のダッシュボード応答、4.4 の `/api/loans` の入力、6.1 のテストケース表が影響を受ける**（該当箇所に注記を入れてある）。要件定義書は v1.1 が正。経緯と理由は `docs/spec-changes.md` の2章。
 
 ---
 
@@ -48,12 +48,12 @@
 
 - 主キーは UUID。クライアント側で採番できるため、オフライン対応を後から入れる余地が残る
 - 金額は整数（円単位）。浮動小数点は使わない。SQLite の `INTEGER` は最大8バイトで足りる
-- **導出できる値はカラムに持たない。** 立替の回収状態は `amount` と `collected_amount` から判定できるため `status` カラムを持たない
+- **導出できる値はカラムに持たない。** 貸し借りの精算状態は `amount` と `settled_amount` から判定できるため `status` カラムを持たない
 - 制約は DB 側にも書く。ドメイン層のバリデーションと二重になるが、DB は最後の砦として扱う
 
 ### 2.2 DDL
 
-**正は `migrations/0001_init.sql`。** ここは読みやすさのために要点だけを写したもので、齟齬があればマイグレーションに従う。
+**正は `migrations/` 配下。** ここは読みやすさのために要点だけを写したもので、齟齬があればマイグレーションに従う。`loans` は `0002_loans.sql` で `lendings` から作り直したもの（`direction` の追加とカラム名の変更を含む）。
 
 ```sql
 CREATE TABLE accounts (
@@ -65,23 +65,24 @@ CREATE TABLE accounts (
     created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE TABLE lendings (
-    id               TEXT    PRIMARY KEY,
-    counterparty     TEXT    NOT NULL,
-    description      TEXT    NOT NULL DEFAULT '',
-    amount           INTEGER NOT NULL CHECK (amount > 0),
-    collected_amount INTEGER NOT NULL DEFAULT 0 CHECK (collected_amount >= 0),
-    occurred_on      TEXT    NOT NULL
+CREATE TABLE loans (
+    id             TEXT    PRIMARY KEY,
+    direction      TEXT    NOT NULL CHECK (direction IN ('lent', 'borrowed')),
+    counterparty   TEXT    NOT NULL,
+    description    TEXT    NOT NULL DEFAULT '',
+    amount         INTEGER NOT NULL CHECK (amount > 0),
+    settled_amount INTEGER NOT NULL DEFAULT 0 CHECK (settled_amount >= 0),
+    occurred_on    TEXT    NOT NULL
         CHECK (occurred_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-    created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    CONSTRAINT lendings_collected_within_amount
-        CHECK (collected_amount <= amount)
+    created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CONSTRAINT loans_settled_within_amount
+        CHECK (settled_amount <= amount)
 );
 
-CREATE INDEX idx_lendings_outstanding
-    ON lendings (occurred_on DESC)
-    WHERE collected_amount < amount;
+CREATE INDEX idx_loans_outstanding
+    ON loans (occurred_on DESC)
+    WHERE settled_amount < amount;
 
 CREATE TABLE wishes (
     id         TEXT    PRIMARY KEY,
@@ -133,13 +134,13 @@ SQLite には `UUID` / `DATE` / `TIMESTAMPTZ` の型が無い。**Postgres で�
 
 **日を持たなければ、日がずれる余地そのものが消える。** 格納形式とドメイン型 `YearMonth` の表現も一致する。文字列比較で年月順に並ぶため、「直近3ヶ月」は `ORDER BY year_month DESC LIMIT 3` のまま書ける。
 
-**立替の部分インデックス**
+**貸し借りの部分インデックス**
 
-未回収の一覧が主要な参照パターンのため、`collected_amount < amount` の部分インデックスを張る。回収済みのレコードが積み上がっても未回収の検索速度が落ちない。個人利用の規模では過剰だが、部分インデックスを書く練習として入れている。
+未精算の一覧が主要な参照パターンのため、`settled_amount < amount` の部分インデックスを張る。精算済みのレコードが積み上がっても未精算の検索速度が落ちない。個人利用の規模では過剰だが、部分インデックスを書く練習として入れている。
 
 **`transactions.ref_id` に外部キーを張らない理由**
 
-参照先が `lendings` と `wishes` の両方になるポリモーフィックな参照のため、FK 制約は付けられない。整合性はアプリケーション側で担保する。ここは設計上の妥協点として認識しておく。
+参照先が `loans` と `wishes` の両方になるポリモーフィックな参照のため、FK 制約は付けられない。整合性はアプリケーション側で担保する。ここは設計上の妥協点として認識しておく。
 
 ---
 
@@ -223,33 +224,45 @@ func (a Account) CountsTowardNetAsset() bool {
 ```
 
 ```go
-type Lending struct {
-    ID              uuid.UUID
-    Counterparty    string
-    Description     string
-    Amount          Money
-    CollectedAmount Money
-    OccurredOn      time.Time
+// LoanDirection は貸借の向き。金額は向きによらず常に正で持ち、
+// 向きはこの型だけが表す（2026-07-30 の変更）。
+type LoanDirection string
+
+const (
+    LoanLent     LoanDirection = "lent"     // 貸した（立て替えた）
+    LoanBorrowed LoanDirection = "borrowed" // 借りた
+)
+
+type Loan struct {
+    ID            uuid.UUID
+    Direction     LoanDirection
+    Counterparty  string
+    Description   string
+    Amount        Money // 向きによらず正。負の金額で「借りた」を表さない
+    SettledAmount Money
+    OccurredOn    time.Time
 }
 
-// 未回収残高。**実質資産には加算しない**（2026-07-30 の変更）。別枠の参考値。
-func (l Lending) Outstanding() Money {
-    return l.Amount.Sub(l.CollectedAmount)
+// 未精算残高。**実質資産には加算しない**（2026-07-30 の変更）。別枠の参考値。
+func (l Loan) Outstanding() Money {
+    return l.Amount.Sub(l.SettledAmount)
 }
 
-func (l Lending) IsFullyCollected() bool {
+func (l Loan) IsFullySettled() bool {
     return l.Outstanding().IsZero()
 }
 
-// 回収を記録する。過回収は許さない。
-func (l *Lending) Collect(amount Money) error {
+// 精算を記録する。貸した側では回収、借りた側では返済にあたる。
+// **向きで処理を分けない。** どちらも未精算残高が減るだけ。
+// 過精算は許さない。
+func (l *Loan) Settle(amount Money) error {
     if !amount.IsPositive() {
         return ErrInvalidAmount
     }
     if amount > l.Outstanding() {
-        return ErrCollectExceedsOutstanding
+        return ErrSettleExceedsOutstanding
     }
-    l.CollectedAmount = l.CollectedAmount.Add(amount)
+    l.SettledAmount = l.SettledAmount.Add(amount)
     return nil
 }
 ```
@@ -346,13 +359,13 @@ func (w *Wish) Drop() error {
 
 **本アプリの中核。外部依存を一切持たない純粋関数として実装する。**
 
-> **2026-07-30 の変更：** 下のコードは立替を加算していたときの記述。**現在は立替を加算しない。** 実際のシグネチャは `worker/src/domain/netAsset.ts` を見ること。`calculateBreakdown` は立替を引数に取らず、未回収の合計は `calculateOutstandingLendings` が別に返す。
+> **2026-07-30 の変更：** 下のコードは貸し借りを加算していたときの記述。**現在は貸し借りを加算しない。** 実際のシグネチャは `worker/src/domain/netAsset.ts` を見ること。`calculateBreakdown` は貸し借りを引数に取らず、未精算の合計は `calculateOutstandingLoans` が別に返す。
 
 ```go
 // networth.go
 
 // 実質資産 = 現金預金 − 確定支出
-// （2026-07-30 より前は、ここに未回収立替も加算していた）
+// （2026-07-30 より前は、ここに未精算貸し借りも加算していた）
 func CalculateNetAsset(accounts []Account, wishes []Wish) Money {
     var total Money
     for _, a := range accounts {
@@ -371,8 +384,15 @@ func CalculateNetAsset(accounts []Account, wishes []Wish) Money {
 // 投資資産の合計（参考値。実質資産には含めない）
 func CalculateInvestmentTotal(accounts []Account) Money
 
-// 未回収立替の合計（参考値。実質資産には含めない）
-func CalculateOutstandingLendings(lendings []Lending) Money
+// 未精算の貸し借りを向きごとに合計（参考値。実質資産には含めない）
+//
+// 差額にまとめない。引き算すると、誰にいくら貸しているのかが消える。
+type OutstandingLoans struct {
+    Lent     Money // 貸していて、まだ返ってきていない額
+    Borrowed Money // 借りていて、まだ返していない額
+}
+
+func CalculateOutstandingLoans(loans []Loan) OutstandingLoans
 
 // 不足額 = ウィッシュ金額 − 実質資産
 func CalculateShortfall(wish Wish, netAsset Money) Money
@@ -418,10 +438,10 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | POST | `/api/accounts` | 口座作成 |
 | PATCH | `/api/accounts/{id}` | 口座の更新（名称・残高。種別は変更不可） |
 | DELETE | `/api/accounts/{id}` | 口座削除 |
-| GET | `/api/lendings` | 立替一覧（`?outstanding=true` で未回収のみ） |
-| POST | `/api/lendings` | 立替登録 |
-| POST | `/api/lendings/{id}/collect` | 回収の記録 |
-| DELETE | `/api/lendings/{id}` | 立替削除 |
+| GET | `/api/loans` | 貸し借り一覧（`?outstanding=true` で未精算のみ） |
+| POST | `/api/loans` | 貸し借り登録 |
+| POST | `/api/loans/{id}/settle` | 精算の記録 |
+| DELETE | `/api/loans/{id}` | 貸し借り削除 |
 | GET | `/api/wishes` | ウィッシュ一覧（`?status=` で絞り込み） |
 | POST | `/api/wishes` | ウィッシュ登録 |
 | PATCH | `/api/wishes/{id}` | 内容の更新（title / amount / category / priority / deadline） |
@@ -447,7 +467,8 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
     "commitments": 80000
   },
   "investmentTotal": 350000,
-  "outstandingLendings": 12000,
+  "outstandingLent": 12000,
+  "outstandingBorrowed": 5000,
   "averageSurplus": 65000,
   "wishes": [
     {
@@ -464,23 +485,35 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 `monthsToReach` は算出不可の場合 `null` を返す。クライアント側は `null` を「算出不可」と表示する。
 
-`breakdown` に並ぶのは実質資産を構成する項目だけ。`investmentTotal` と `outstandingLendings` はどちらも実質資産の外の参考値なので、`breakdown` の外に置く。**合計に足されない値を内訳に混ぜない**という形で示している。
+`breakdown` に並ぶのは実質資産を構成する項目だけ。`investmentTotal` と `outstanding*` はどちらも実質資産の外の参考値なので、`breakdown` の外に置く。**合計に足されない値を内訳に混ぜない**という形で示している。
 
-**`POST /api/lendings`**
+**貸しと借りは差額にせず分けて返す。** 引き算して1つにすると、誰にいくら貸しているのかが消える。どちらも正の値。
+
+**`POST /api/loans`**
 
 ```json
-{ "counterparty": "…", "description": "…", "amount": 12000, "occurredOn": "2026-07-26" }
+{
+  "direction": "lent",
+  "counterparty": "…",
+  "description": "…",
+  "amount": 12000,
+  "occurredOn": "2026-07-26"
+}
 ```
 
-**`accountId` は受け取らない。** 立替は口座残高を動かさない（2026-07-30 の変更）。送ると 400 を返す。黙って無視すると「口座を指定したのに残高が変わらない」と読める。
+`direction` は `'lent'`（貸した）または `'borrowed'`（借りた）。**金額は向きによらず正で送る。** 符号で向きを表さない。不正な向きは domain が判定するため **422**（`INVALID_LOAN_DIRECTION`）で、400 ではない。
 
-**`POST /api/lendings/{id}/collect`**
+**`accountId` は受け取らない。** 貸し借りは口座残高を動かさない（2026-07-30 の変更）。送ると 400 を返す。黙って無視すると「口座を指定したのに残高が変わらない」と読める。
+
+**`POST /api/loans/{id}/settle`**
 
 ```json
 { "amount": 5000 }
 ```
 
-回収額が未回収残高を超える場合は 422 を返す。**`accountId` も `occurredOn` も受け取らない。** 口座を触らないため取引履歴が作られず、回収日を残す先が無い。
+精算額が未精算残高を超える場合は 422 を返す。**`accountId` も `occurredOn` も受け取らない。** 口座を触らないため取引履歴が作られず、精算日を残す先が無い。
+
+**向きごとに経路を分けない。** 貸した側では回収、借りた側では返済にあたるが、domain の処理はどちらも「未精算残高が減る」だけで同じ。`/settle` と `/repay` に割ると同じ手順が2本に増え、さらに「`lent` に `/repay` を投げたら 422 か」という判定が新たに要る。
 
 **`PUT /api/monthly-balances/{yearMonth}`**
 
@@ -501,7 +534,7 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | 400 | リクエスト形式の誤り |
 | 401 | 認証失敗 |
 | 404 | 対象が存在しない |
-| 422 | ドメインルール違反（不正な状態遷移、過回収など） |
+| 422 | ドメインルール違反（不正な状態遷移、過精算など） |
 | 500 | サーバー内部エラー |
 
 ドメインエラーは 422 に寄せる。形式は正しいが業務ルール上受け付けられない、という区別を明示するため。
@@ -556,7 +589,7 @@ worker/
 │   │   ├── time.ts              IsoDate / Instant（Date は持ち込まない）
 │   │   ├── yearMonth.ts
 │   │   ├── account.ts
-│   │   ├── lending.ts
+│   │   ├── loan.ts
 │   │   ├── wish.ts
 │   │   ├── monthlyBalance.ts
 │   │   ├── transaction.ts       残高が動いた記録。実質資産の計算には使わない
@@ -565,7 +598,7 @@ worker/
 │   ├── usecase/
 │   │   ├── port.ts              リポジトリのインターフェース、WriteOperation、Clock
 │   │   ├── account.ts
-│   │   ├── lending.ts
+│   │   ├── loan.ts
 │   │   ├── wish.ts
 │   │   ├── monthlyBalance.ts
 │   │   ├── transaction.ts
@@ -620,7 +653,7 @@ D1 が返す行（`WishRow` など）と、ドメインのエンティティ（`
 
 複数テーブルを更新する操作（ウィッシュの支払い → 口座残高の更新 → 取引履歴の記録）は、**usecase が `WriteOperation` の配列として組み立て**、`AtomicWriter` が1回の `db.batch()` に流す。書き込みの制御を handler や repository に散らさない。
 
-立替は 2026-07-30 の変更で口座を触らなくなったため、書き込みは1行だけになった。それでも `AtomicWriter` を通しているのは、**回収に楽観ロックが要る**ため。読み取り時の回収額を条件にしないと、同時に2回回収したときに両方が未回収残高の範囲内に見えて過回収が成立する。その仕組みを持っているのが `AtomicWriter` である。
+貸し借りは 2026-07-30 の変更で口座を触らなくなったため、書き込みは1行だけになった。それでも `AtomicWriter` を通しているのは、**精算に楽観ロックが要る**ため。読み取り時の精算額を条件にしないと、同時に2回精算したときに両方が未精算残高の範囲内に見えて過精算が成立する。その仕組みを持っているのが `AtomicWriter` である。
 
 D1 は `BEGIN` を受け付けないため、Go 版の `RunInTx` に相当するものは無い。`batch()` が1回の呼び出し＝1つのトランザクションとして働く。
 
@@ -662,8 +695,8 @@ front 側も worker 側も、上記すべてを単一のコマンドに束ねる
 | --- | --- | --- |
 | 1 | 現金のみ | 残高の合計がそのまま実質資産 |
 | 2 | 投資口座を含む | **投資分は加算されない** |
-| 3 | 未回収の立替あり | **実質資産は変わらない。** 参考値として未回収残高が返る |
-| 4 | 一部回収済みの立替 | 参考値は未回収分のみ |
+| 3 | 未精算の貸し借りあり | **実質資産は変わらない。** 参考値として未精算残高が返る |
+| 4 | 一部精算済みの貸し借り | 参考値は未精算分のみ |
 | 5 | 確定ウィッシュあり | その金額が控除される |
 | 6 | 検討中ウィッシュのみ | 控除されない |
 | 7 | 完了・見送りのウィッシュ | 控除されない |
@@ -674,7 +707,7 @@ front 側も worker 側も、上記すべてを単一のコマンドに束ねる
 | 12 | 到達見込み：平均余剰が0以下 | ok=false |
 | 13 | 到達見込み：不足額が0以下 | ok=false（既に達成済み） |
 | 14 | 状態遷移：完了から確定へ | エラー |
-| 15 | 回収：未回収残高を超える額 | エラー |
+| 15 | 精算：未精算残高を超える額 | エラー |
 | 16 | 到達見込み：ちょうど割り切れる（例：120万 ÷ 月余剰20万） | 6 |
 | 17 | 到達見込み：割り切れない（例：121万 ÷ 月余剰20万） | 7（切り上げ） |
 
