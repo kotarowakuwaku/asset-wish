@@ -7,9 +7,11 @@ import {
   calculateBreakdown,
   calculateInvestmentTotal,
   calculateShortfall,
+  monthlySavingNeeded,
   monthsToReach,
   netAsset,
 } from './netAsset'
+import { YearMonth } from './yearMonth'
 import type { Wish } from './wish'
 
 describe('calculateBreakdown', () => {
@@ -200,6 +202,36 @@ describe('monthsToReach', () => {
 
   it.each(cases)('$name', (c) => {
     expect(monthsToReach(yen(c.shortfall), yen(c.avgSurplus))).toBe(c.want)
+  })
+})
+
+describe('monthlySavingNeeded', () => {
+  const july = YearMonth.of(2026, 7)
+
+  const cases: {
+    name: string
+    shortfall: number
+    deadline: YearMonth | null
+    want: number | null
+  }[] = [
+    { name: '4ヶ月で割る（当月を含める）', shortfall: 300_000, deadline: YearMonth.of(2026, 10), want: 75_000 },
+    { name: '期限が当月なら全額', shortfall: 300_000, deadline: july, want: 300_000 },
+    { name: '割り切れないときは切り上げる', shortfall: 100_000, deadline: YearMonth.of(2026, 9), want: 33_334 },
+    { name: '期限が無ければ算出不可', shortfall: 300_000, deadline: null, want: null },
+    { name: '期限が過ぎていれば算出不可', shortfall: 300_000, deadline: YearMonth.of(2026, 6), want: null },
+    { name: '不足額0なら算出不可（達成済み）', shortfall: 0, deadline: YearMonth.of(2026, 10), want: null },
+    { name: '不足額が負なら算出不可', shortfall: -1, deadline: YearMonth.of(2026, 10), want: null },
+  ]
+
+  it.each(cases)('$name', (c) => {
+    expect(monthlySavingNeeded(yen(c.shortfall), c.deadline, july)).toBe(c.want)
+  })
+
+  // 切り上げるのは、割り切れない分を毎月少しずつ多く積まないと期限に届かないため。
+  it('切り上げた額を残り月数ぶん積めば不足額に届く', () => {
+    const perMonth = monthlySavingNeeded(yen(100_000), YearMonth.of(2026, 9), july)
+    expect(perMonth).not.toBeNull()
+    expect((perMonth ?? 0) * 3).toBeGreaterThanOrEqual(100_000)
   })
 })
 

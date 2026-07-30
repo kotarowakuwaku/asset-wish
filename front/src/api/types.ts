@@ -78,6 +78,8 @@ export type DashboardWish = Wish & {
   shortfall: number
   /** 到達見込みの月数。算出不可なら null。0 と混同しないこと。 */
   monthsToReach: number | null
+  /** 期限までに毎月いくら貯めればよいか。期限が無い・過ぎている・到達済みなら null。 */
+  monthlySavingNeeded: number | null
 }
 
 export type Dashboard = {

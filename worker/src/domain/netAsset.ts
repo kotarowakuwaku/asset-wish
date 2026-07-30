@@ -3,6 +3,7 @@ import type { Lending } from './lending'
 import { addMoney, isPositiveMoney, subMoney, ZERO_MONEY, type Money } from './money'
 import type { MonthlyBalance } from './monthlyBalance'
 import type { Wish } from './wish'
+import type { YearMonth } from './yearMonth'
 
 /** 平均月間余剰の算出に用いる遡及月数。 */
 export const AVERAGE_SURPLUS_MONTHS = 3
@@ -117,4 +118,31 @@ export function averageSurplus(balances: readonly MonthlyBalance[], months: numb
 export function monthsToReach(shortfall: Money, avgSurplus: Money): number | null {
   if (!isPositiveMoney(shortfall) || !isPositiveMoney(avgSurplus)) return null
   return Math.ceil(shortfall / avgSurplus)
+}
+
+/**
+ * 期限までに毎月いくら貯めればよいかを返す。
+ *
+ * `monthsToReach`（この余剰なら何ヶ月かかるか）とちょうど逆向きの計算で、
+ * 「いつまでに欲しいか」が決まっているウィッシュに対して使う。
+ *
+ *   shortfall <= 0 → null（すでに達成可能）
+ *   deadline が無い → null（期限が無ければ「毎月いくら」も決まらない）
+ *   期限が過ぎている → null（間に合わない。0 を返すと達成済みに見える）
+ *
+ * 期限が当月なら残り1ヶ月として扱う。**今月中に全額、という意味になる。**
+ * 0ヶ月で割ると無限大になるうえ、「今月が期限」は「今月払う」であって
+ * 「もう間に合わない」ではない。
+ */
+export function monthlySavingNeeded(
+  shortfall: Money,
+  deadline: YearMonth | null,
+  current: YearMonth,
+): Money | null {
+  if (!isPositiveMoney(shortfall) || deadline === null) return null
+
+  const remaining = current.monthsUntil(deadline)
+  if (remaining < 0) return null
+
+  return Math.ceil(shortfall / (remaining + 1)) as Money
 }

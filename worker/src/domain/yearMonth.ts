@@ -60,6 +60,15 @@ export class YearMonth {
     return YearMonth.of(year, total - year * 12 + 1)
   }
 
+  /**
+   * this から other までの月数を返す。other が過去なら負。
+   *
+   * 「期限まであと何ヶ月あるか」を出すのに使う。同じ月なら 0。
+   */
+  monthsUntil(other: YearMonth): number {
+    return (other.year - this.year) * 12 + (other.month - this.month)
+  }
+
   /** this < other なら負、等しければ 0、this > other なら正。並べ替えに使う。 */
   compare(other: YearMonth): number {
     if (this.year !== other.year) return this.year - other.year

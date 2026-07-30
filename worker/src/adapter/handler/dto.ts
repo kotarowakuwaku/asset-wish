@@ -92,6 +92,8 @@ export function dashboardResponse(d: Dashboard) {
       shortfall: w.shortfall,
       // 算出不可なら null。0 を返すと「今月中に届く」と誤読される。
       monthsToReach: w.monthsToReach,
+      // 期限までに毎月いくら貯めればよいか。期限が無ければ null。
+      monthlySavingNeeded: w.monthlySavingNeeded,
     })),
   }
 }

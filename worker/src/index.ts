@@ -47,7 +47,7 @@ export function buildDeps(env: Env): Deps {
     wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
     balances: new MonthlyBalanceUsecase(balanceRepo, newID),
     transactions: new TransactionUsecase(transactionRepo),
-    dashboard: new DashboardUsecase(accountRepo, lendingRepo, wishRepo, balanceRepo),
+    dashboard: new DashboardUsecase(accountRepo, lendingRepo, wishRepo, balanceRepo, now),
     now,
     authToken,
   }

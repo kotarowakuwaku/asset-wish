@@ -10,6 +10,7 @@ import {
   Section,
 } from '../components/common'
 import {
+  formatMonthlySaving,
   formatMonths,
   formatShortfall,
   wishCategoryLabel,
@@ -60,14 +61,6 @@ export function Dashboard({ client }: { client: ApiClient }) {
         </dl>
       </section>
 
-      <Section title="投資資産（参考）">
-        {/* 投資は実質資産に含めない。別枠の参考値として出す（不変条件1）。 */}
-        <p className="reference-value">
-          <Money amount={data.investmentTotal} />
-        </p>
-        <p className="muted">実質資産には含めていません。</p>
-      </Section>
-
       <Section title="平均月間余剰">
         {data.hasAverageSurplus ? (
           <p className="reference-value">
@@ -107,6 +100,14 @@ export function Dashboard({ client }: { client: ApiClient }) {
                     {formatMonths(wish.monthsToReach)}
                   </span>
                 </div>
+                {/* 期限があるものだけ。平均月間余剰に依存しないので、
+                    月次収支が未登録でも出る。 */}
+                {wish.monthlySavingNeeded !== null && (
+                  <div className="card-foot">
+                    <span className="muted">期限までに</span>
+                    <span>{formatMonthlySaving(wish.monthlySavingNeeded)}</span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

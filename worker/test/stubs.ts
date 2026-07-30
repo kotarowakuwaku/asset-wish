@@ -66,7 +66,9 @@ export function aDashboard(): Dashboard {
     netAsset: yen(842_000),
     investmentTotal: yen(350_000),
     averageSurplus: yen(60_000),
-    wishes: [{ wish: aWish(), shortfall: yen(358_000), monthsToReach: 6 }],
+    wishes: [
+      { wish: aWish(), shortfall: yen(358_000), monthsToReach: 6, monthlySavingNeeded: yen(59_667) },
+    ],
   }
 }
 

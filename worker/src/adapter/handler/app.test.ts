@@ -75,6 +75,7 @@ describe('GET /api/dashboard', () => {
           deadline: null,
           shortfall: 358_000,
           monthsToReach: 6,
+          monthlySavingNeeded: 59_667,
         },
       ],
     })
