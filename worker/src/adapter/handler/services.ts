@@ -24,6 +24,8 @@ export type AccountService = {
   delete(id: string): Promise<void>
 }
 
+// 立替は口座を触らないため accountId を受け取らない（不変条件4）。
+// 回収日も受け取らない。記録する先が無い（取引履歴が作られない）。
 export type LendingService = {
   list(outstandingOnly: boolean): Promise<Lending[]>
   create(
@@ -31,9 +33,8 @@ export type LendingService = {
     description: string,
     amount: Money,
     occurredOn: IsoDate,
-    accountId: string,
   ): Promise<Lending>
-  collect(lendingId: string, amount: Money, occurredOn: IsoDate, accountId: string): Promise<Lending>
+  collect(lendingId: string, amount: Money): Promise<Lending>
   delete(id: string): Promise<void>
 }
 

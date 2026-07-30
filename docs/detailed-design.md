@@ -2,6 +2,10 @@
 
 > **実装言語の変更について（2026-07）：** サーバーの実装は Go から TypeScript（Cloudflare Workers + D1）に移行した。**本書が定めるシグネチャ・エラーコード・テストケースの意図はそのまま有効**だが、**コード例は Go 版の記述**である。実際のシグネチャは `worker/src/` を正とする。移行で変わった点は `docs/migration-cloudflare.md` に集約してある。
 
+> **仕様変更について（2026-07-30）：** **立替を実質資産の計算から外し、口座残高も取引履歴も触らないようにした。** 実質資産は `現金・預金 − 確定支出` になり、未回収の立替は投資資産と同じ別枠の参考値になった。
+>
+> 本書は「`design.md` と矛盾する場合は本書が正」と位置づけているが、**この仕様変更については `docs/requirements.md` v1.1 と `CLAUDE.md` の不変条件4が正**。本書の該当箇所（2.5 の `Outstanding`、2.9 の `NetAssetBreakdown` / `CalculateBreakdown`、3.2 の立替のユースケース、6.3 の API、7.3 のテストケース表）は下に注記を入れて残してある。**残しているのは、何をどう変えたかを後から辿れるようにするため。読むときは注記のほうを取ること。** 経緯と理由は `docs/spec-changes.md` の 2a。
+
 
 個人資産・ウィッシュ管理アプリ
 
@@ -195,7 +199,8 @@ func (a Account) CountsTowardNetAsset() bool {
 // UpdateBalance は残高を更新し、更新日時を now にする。
 func (a *Account) UpdateBalance(balance Money, now time.Time)
 
-// ApplyDelta は残高を増減させる。立替の発生・回収、ウィッシュの支払いで用いる。
+// ApplyDelta は残高を増減させる。ウィッシュの支払いで用いる。
+// （2026-07-30 より前は立替の発生・回収でも用いていた）
 func (a *Account) ApplyDelta(delta Money, now time.Time)
 
 // IsStale は最終更新から threshold 以上経過しているかを返す。
@@ -230,8 +235,9 @@ type Lending struct {
 // counterparty が空、または amount が 1 未満なら error を返す。
 func NewLending(id uuid.UUID, counterparty, description string, amount Money, occurredOn time.Time) (Lending, error)
 
-// Outstanding は未回収残高を返す。実質資産への加算対象。
+// Outstanding は未回収残高を返す。
 // 【不変条件】Amount - CollectedAmount であること。
+// 【2026-07-30 の変更】実質資産には加算しない。別枠の参考値として表示するだけ。
 func (l Lending) Outstanding() Money {
     return l.Amount.Sub(l.CollectedAmount)
 }
@@ -375,19 +381,20 @@ const StaleBalanceThreshold = 45 * 24 * time.Hour
 
 #### 2.9.1 NetAssetBreakdown
 
+> **2026-07-30 の変更：** `OutstandingLendings` を**この型から外した。** 未回収の立替は実質資産に足さないため、内訳に置いたまま `NetAsset()` で無視する形にすると「内訳にあるのに合計に入っていない項目」ができ、あとから足し戻す事故が起きうる。`NetAsset()` が全フィールドを必ず使う形を保ち、未回収額は `CalculateOutstandingLendings`（2.9.2 の末尾）が別に返す。
+
 ```go
 // NetAssetBreakdown は実質資産の内訳。
 // ダッシュボードで内訳を表示するため、合計値だけでなく構成要素も保持する。
 type NetAssetBreakdown struct {
-    CashTotal           Money // 現金・預金の残高合計
-    OutstandingLendings Money // 未回収の立替の合計
-    Commitments         Money // 確定支出の合計（正の値で保持）
+    CashTotal   Money // 現金・預金の残高合計
+    Commitments Money // 確定支出の合計（正の値で保持）
 }
 
 // NetAsset は実質資産を返す。
-//   CashTotal + OutstandingLendings - Commitments
+//   CashTotal - Commitments
 func (b NetAssetBreakdown) NetAsset() Money {
-    return b.CashTotal.Add(b.OutstandingLendings).Sub(b.Commitments)
+    return b.CashTotal.Sub(b.Commitments)
 }
 ```
 
@@ -401,24 +408,23 @@ func (b NetAssetBreakdown) NetAsset() Money {
 // 【不変条件】
 //   - kind が investment の口座は CashTotal に含めない
 //   - status が committed 以外のウィッシュは Commitments に含めない
-//   - 立替は回収済みの分を除いた未回収残高のみを加算する
+//
+// 【2026-07-30 の変更】立替を引数に取らない。実質資産に一切関与しなくなったため。
+// 引数に残すと「使わない引数」ができ、読む側が関与を疑う。
 //
 // 引数のスライスは変更しない。空スライス・nil はいずれも 0 として扱う。
-func CalculateBreakdown(accounts []Account, lendings []Lending, wishes []Wish) NetAssetBreakdown
+func CalculateBreakdown(accounts []Account, wishes []Wish) NetAssetBreakdown
 ```
 
 実装：
 
 ```go
-func CalculateBreakdown(accounts []Account, lendings []Lending, wishes []Wish) NetAssetBreakdown {
+func CalculateBreakdown(accounts []Account, wishes []Wish) NetAssetBreakdown {
     var b NetAssetBreakdown
     for _, a := range accounts {
         if a.CountsTowardNetAsset() {
             b.CashTotal = b.CashTotal.Add(a.Balance)
         }
-    }
-    for _, l := range lendings {
-        b.OutstandingLendings = b.OutstandingLendings.Add(l.Outstanding())
     }
     for _, w := range wishes {
         if w.IsCommitment() {
@@ -427,6 +433,17 @@ func CalculateBreakdown(accounts []Account, lendings []Lending, wishes []Wish) N
     }
     return b
 }
+```
+
+**未回収の立替は別の関数で出す。**
+
+```go
+// CalculateOutstandingLendings は未回収の立替の合計を返す。
+//
+// 【不変条件】実質資産には含めない。投資資産と同じ、別枠の参考値である。
+// 立て替えた時点で現金が出たとは限らない（カード払いなら引き落としはまだ）ため、
+// 残高にも実質資産にも触らせない。
+func CalculateOutstandingLendings(lendings []Lending) Money
 ```
 
 #### 2.9.3 その他の集計
@@ -617,40 +634,30 @@ type TxManager interface {
 
 #### 3.2.1 立替の登録（CreateLending）
 
-立て替えた時点で自分の口座からは金が出ているため、残高を減らす。
+> **2026-07-30 の変更。** 口座残高も取引履歴も触らなくなった。**入力から `accountID` が消えている。** 変更前は「立て替えた時点で自分の口座から金が出ている」と決め打ちして残高を減らしていたが、カードで立て替えた場合は現金がまだ出ていない。
 
 ```
-入力: counterparty, description, amount, occurredOn, accountID
+入力: counterparty, description, amount, occurredOn
 
 1. domain.NewLending(...) で生成（バリデーションはここ）
-2. RunInTx:
-   a. accountRepo.Get(accountID)
-   b. account.ApplyDelta(-amount, now)
-   c. accountRepo.Update(account)
-   d. lendingRepo.Create(lending)
-   e. txRepo.Create(Transaction{
-        AccountID: accountID, Amount: -amount,
-        Kind: "lending_created", RefID: lending.ID, OccurredOn: occurredOn})
+2. lendingRepo.Create(lending)
 ```
+
+変更前は、口座の取得・残高の増減・取引履歴の記録を含む5手順をトランザクションの中で実行していた。
 
 #### 3.2.2 立替の回収（CollectLending）
 
-```
-入力: lendingID, amount, occurredOn, accountID
+> **2026-07-30 の変更。** 口座残高も取引履歴も触らなくなった。**入力から `accountID` と `occurredOn` が消えている。** 回収日は取引履歴の `occurred_on` に入れていたが、その履歴が作られなくなったため残す先が無い。
 
-1. RunInTx:
-   a. lendingRepo.Get(lendingID)     → 無ければ ErrNotFound
-   b. lending.Collect(amount)         → 過回収なら ErrCollectExceedsOutstanding
-   c. lendingRepo.Update(lending)
-   d. accountRepo.Get(accountID)
-   e. account.ApplyDelta(+amount, now)
-   f. accountRepo.Update(account)
-   g. txRepo.Create(Transaction{
-        AccountID: accountID, Amount: +amount,
-        Kind: "lending_collected", RefID: lendingID, OccurredOn: occurredOn})
+```
+入力: lendingID, amount
+
+1. lendingRepo.Get(lendingID)     → 無ければ ErrNotFound
+2. lending.Collect(amount)         → 過回収なら ErrCollectExceedsOutstanding
+3. lendingRepo.Update(lending)     ← 読み取り時の CollectedAmount を条件にする
 ```
 
-**手順 b をトランザクションの内側に置く。** 取得と更新の間に別の回収が入ると過回収が成立しうるため、`Get` から `Update` までを同一トランザクションに含める。
+**手順3は「読み取った時点から回収額が変わっていないこと」を条件に書き込む。** 取得と更新の間に別の回収が入ると、どちらも未回収残高の範囲内に見えて過回収が成立しうる。書き込みが1行だけになっても `AtomicWriter` を通しているのはこのためで、楽観ロックの仕組みをそこが持っている（`docs/migration-cloudflare.md` 4章）。
 
 #### 3.2.3 ウィッシュの支払い（PayWish）
 
@@ -678,9 +685,10 @@ type TxManager interface {
 2. lendingRepo.List(outstandingOnly: true)
 3. wishRepo.List(status: nil)
 4. monthlyRepo.ListRecent(domain.AverageSurplusMonths)
-5. breakdown := domain.CalculateBreakdown(accounts, lendings, wishes)
+5. breakdown := domain.CalculateBreakdown(accounts, wishes)   // 立替は渡さない
 6. netAsset := breakdown.NetAsset()
 7. investment := domain.CalculateInvestmentTotal(accounts)
+7'. outstanding := domain.CalculateOutstandingLendings(lendings)  // 参考値
 8. avg, hasAvg := domain.AverageSurplus(balances, domain.AverageSurplusMonths)
 9. 各ウィッシュ（done / dropped を除く）について:
      shortfall := domain.CalculateShortfall(w, netAsset)
@@ -851,13 +859,13 @@ VALUES ($1, $2, $3, $4, $5, $6);
 
 ```json
 {
-  "netAsset": 842000,
+  "netAsset": 830000,
   "breakdown": {
     "cashTotal": 910000,
-    "outstandingLendings": 12000,
     "commitments": 80000
   },
   "investmentTotal": 350000,
+  "outstandingLendings": 12000,
   "averageSurplus": 65000,
   "hasAverageSurplus": true,
   "wishes": [
@@ -902,16 +910,18 @@ VALUES ($1, $2, $3, $4, $5, $6);
 | メソッド | パス | ボディ | 成功 |
 | --- | --- | --- | --- |
 | GET | `/api/lendings?outstanding=true` | — | 200 配列 |
-| POST | `/api/lendings` | `{counterparty, description, amount, occurredOn, accountId}` | 201 |
-| POST | `/api/lendings/{id}/collect` | `{amount, occurredOn, accountId}` | 200 |
+| POST | `/api/lendings` | `{counterparty, description, amount, occurredOn}` | 201 |
+| POST | `/api/lendings/{id}/collect` | `{amount}` | 200 |
 | DELETE | `/api/lendings/{id}` | — | 204 |
+
+> **2026-07-30 の変更：** POST から `accountId`、collect から `accountId` と `occurredOn` が消えた。**送ると 400 を返す。** 黙って無視すると「口座を指定したのに残高が変わらない」と読めるため。立替は口座残高を動かさない。
 
 レスポンスの立替オブジェクトには、導出値も含める。
 
 ```json
 {
   "id": "...",
-  "counterparty": "田中",
+  "counterparty": "テスト相手",
   "description": "◯◯のライブチケット代",
   "amount": 12000,
   "collectedAmount": 5000,
@@ -982,17 +992,26 @@ VALUES ($1, $2, $3, $4, $5, $6);
 | --- | --- | --- |
 | A-1 | 現金口座のみ（500,000 と 300,000） | cashTotal=800,000、netAsset=800,000 |
 | A-2 | 現金 500,000 + 投資 400,000 | **cashTotal=500,000、netAsset=500,000**（投資は加算されない） |
-| A-3 | 現金 500,000、未回収立替 12,000（回収0） | outstandingLendings=12,000、netAsset=512,000 |
-| A-4 | 現金 500,000、立替 12,000 のうち 5,000 回収済 | outstandingLendings=7,000、netAsset=507,000 |
-| A-5 | 現金 500,000、立替 12,000 全額回収済 | outstandingLendings=0、netAsset=500,000 |
 | A-6 | 現金 500,000、committed のウィッシュ 80,000 | commitments=80,000、netAsset=420,000 |
 | A-7 | 現金 500,000、considering のウィッシュ 80,000 | **commitments=0、netAsset=500,000** |
 | A-8 | 現金 500,000、done のウィッシュ 80,000 | **commitments=0、netAsset=500,000** |
 | A-9 | 現金 500,000、dropped のウィッシュ 80,000 | **commitments=0、netAsset=500,000** |
 | A-10 | 全部空（nil スライス） | すべて 0 |
-| A-11 | 現金 910,000 + 投資 350,000、未回収 12,000、committed 80,000 | cashTotal=910,000、outstanding=12,000、commitments=80,000、netAsset=842,000 |
+| A-11 | 現金 910,000 + 投資 350,000、committed 80,000 | cashTotal=910,000、commitments=80,000、netAsset=830,000 |
 
 **A-2、A-7、A-8、A-9 が最重要。** ここが壊れるとアプリの存在意義が消える。
+
+#### A'. CalculateOutstandingLendings
+
+> **2026-07-30 の変更で分離した。** A-3〜A-5 は `CalculateBreakdown` のケースだったが、立替が実質資産に関与しなくなったためこちらへ移した。**いずれも `netAsset` は動かない**ことを併せて確認する。
+
+| # | 入力 | 期待 |
+| --- | --- | --- |
+| A-3 | 未回収立替 12,000（回収0） | 12,000 |
+| A-4 | 立替 12,000 のうち 5,000 回収済 | 7,000 |
+| A-5 | 立替 12,000 全額回収済 | 0 |
+| A-12 | 立替 12,000（回収0）と 8,000（3,000 回収済） | 17,000 |
+| A-13 | 空（nil スライス） | 0 |
 
 #### B. AverageSurplus
 
@@ -1083,13 +1102,17 @@ C-1 と C-2 のペアが切り上げ実装の正しさを担保する。**両方
 
 | # | ケース | 期待 |
 | --- | --- | --- |
-| H-1 | CollectLending 正常系 | 立替の回収額、口座残高、取引履歴の3つがすべて更新される |
-| H-2 | CollectLending で過回収 | エラーを返し、**口座残高も取引履歴も変化しない**（ロールバック） |
+| H-1 | CollectLending 正常系 | 立替の回収額だけが更新される |
+| H-2 | CollectLending で過回収 | エラーを返し、回収額が変化しない |
 | H-3 | PayWish 正常系の前後で実質資産を比較 | **支払い前後で実質資産が変わらない**（確定支出が消え、同額だけ残高が減るため） |
 | H-4 | PayWish を considering のウィッシュに対して実行 | ErrInvalidTransition、副作用なし |
 | H-5 | GetDashboard で done / dropped のウィッシュ | レスポンスに含まれない |
+| H-6 | CreateLending / CollectLending の前後で口座残高と取引履歴を確認 | **どちらも変化しない**（2026-07-30 の変更） |
+| H-7 | CollectLending の途中で別の回収が入る | ConflictError（409）。回収額は先に入った側の値のまま |
 
-**H-2 と H-3 が重要。** H-2 はトランザクション境界が正しいことの検証、H-3 は状態遷移と残高更新の整合性の検証にあたる。
+**H-3、H-6、H-7 が重要。** H-3 は状態遷移と残高更新の整合性、H-6 は立替が口座から切り離されていること（不変条件4）、H-7 は楽観ロックが過回収を防いでいることの検証にあたる。
+
+> **2026-07-30 の変更：** H-1・H-2 から口座残高と取引履歴の検証を外し、代わりに「触っていないこと」を見る H-6 を足した。**変更前は「3つがすべて更新される」ことが正しさの基準だった。**
 
 ---
 

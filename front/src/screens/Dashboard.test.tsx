@@ -17,13 +17,13 @@ function stubClient(data: DashboardData): ApiClient {
 }
 
 const base: DashboardData = {
-  netAsset: 842000,
+  netAsset: 830000,
   breakdown: {
     cashTotal: 910000,
-    outstandingLendings: 12000,
     commitments: 80000,
   },
   investmentTotal: 350000,
+  outstandingLendings: 12000,
   averageSurplus: 65000,
   hasAverageSurplus: true,
   wishes: [],
@@ -34,10 +34,9 @@ describe('実質資産', () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByText('¥842,000')).toBeInTheDocument()
+      expect(screen.getByText('¥830,000')).toBeInTheDocument()
     })
     expect(screen.getByText('¥910,000')).toBeInTheDocument()
-    expect(screen.getByText('¥12,000')).toBeInTheDocument()
     expect(screen.getByText('¥80,000')).toBeInTheDocument()
   })
 
@@ -47,10 +46,40 @@ describe('実質資産', () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByText('¥842,000')).toBeInTheDocument()
+      expect(screen.getByText('¥830,000')).toBeInTheDocument()
     })
     expect(screen.queryByText('¥350,000')).not.toBeInTheDocument()
     expect(screen.queryByText(/投資/)).not.toBeInTheDocument()
+  })
+
+  // 立替は実質資産の内訳ではない（不変条件4）。内訳の dl に混ぜると
+  // 「合計に足されている」と読める。
+  it('未回収の立替は内訳ではなく別枠に出す', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('¥830,000')).toBeInTheDocument()
+    })
+
+    expect(
+      screen.getByRole('heading', { name: '未回収の立替' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('¥12,000')).toBeInTheDocument()
+
+    // 内訳に並ぶのは現金・預金と確定した支出だけ。
+    const terms = screen.getAllByRole('term').map((t) => t.textContent)
+    expect(terms).toEqual(['現金・預金', '確定した支出'])
+  })
+
+  // 0 を「¥0」と出すと、立替が1件あって全額回収済みなのか、
+  // そもそも無いのかが読み取れない。
+  it('未回収が0なら金額を出さない', async () => {
+    render(<Dashboard client={stubClient({ ...base, outstandingLendings: 0 })} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('未回収の立替はありません。')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('¥0')).not.toBeInTheDocument()
   })
 })
 

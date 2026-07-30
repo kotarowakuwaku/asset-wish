@@ -4,6 +4,7 @@ import {
   averageSurplus,
   calculateBreakdown,
   calculateInvestmentTotal,
+  calculateOutstandingLendings,
   calculateShortfall,
   monthlySavingNeeded,
   monthsToReach,
@@ -35,7 +36,13 @@ export type DashboardWish = {
 export type Dashboard = {
   breakdown: NetAssetBreakdown
   netAsset: Money
+  /** 実質資産の外の参考値（不変条件1）。 */
   investmentTotal: Money
+  /**
+   * 未回収の立替の合計。**実質資産の外の参考値**（不変条件4）。
+   * breakdown ではなくここに置いてあるのは、合計に足されない値だから。
+   */
+  outstandingLendings: Money
   /** データが無ければ null（算出不可）。 */
   averageSurplus: Money | null
   wishes: DashboardWish[]
@@ -72,14 +79,14 @@ export class DashboardUsecase {
   async get(): Promise<Dashboard> {
     const [accounts, lendings, wishes, balances] = await Promise.all([
       this.#accounts.list(),
-      // 未回収のみ。回収済みの立替は実質資産に足さない。
+      // 未回収のみ。回収済みの立替は返ってくる予定の額に含めない。
       this.#lendings.list(true),
       this.#wishes.list(null),
       this.#balances.listRecent(AVERAGE_SURPLUS_MONTHS),
     ])
 
     const currentMonth = YearMonth.parse(yearMonthOf(this.#now()))
-    const breakdown = calculateBreakdown(accounts, lendings, wishes)
+    const breakdown = calculateBreakdown(accounts, wishes)
     const total = netAsset(breakdown)
     const avgSurplus = averageSurplus(balances, AVERAGE_SURPLUS_MONTHS)
 
@@ -107,6 +114,7 @@ export class DashboardUsecase {
       breakdown,
       netAsset: total,
       investmentTotal: calculateInvestmentTotal(accounts),
+      outstandingLendings: calculateOutstandingLendings(lendings),
       averageSurplus: avgSurplus,
       wishes: dashboardWishes,
     }

@@ -82,7 +82,12 @@ export class Lending {
     return new Lending(id, counterparty, description, amount, collectedAmount, occurredOn)
   }
 
-  /** 未回収残高。実質資産への加算対象（不変条件4）。 */
+  /**
+   * 未回収残高。
+   *
+   * 実質資産には加算しない。別枠の参考値として表示するだけ（不変条件4）。
+   * 過回収を拒む判定にも使う。
+   */
   outstanding(): Money {
     return subMoney(this.amount, this.#collectedAmount)
   }

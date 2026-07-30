@@ -63,18 +63,16 @@ function seedBalance(year: number, month: number, income: number, expense: numbe
 }
 
 describe('実質資産', () => {
-  it('現金 + 未回収立替 - 確定支出', async () => {
+  it('現金 - 確定支出', async () => {
     seedAccount('cash', 910_000)
     seedAccount('investment', 350_000)
-    seedLending(12_000, 0)
     seedWish(80_000, 'committed')
 
     const d = await usecase.get()
 
     expect(d.breakdown.cashTotal).toBe(910_000)
-    expect(d.breakdown.outstandingLendings).toBe(12_000)
     expect(d.breakdown.commitments).toBe(80_000)
-    expect(d.netAsset).toBe(842_000)
+    expect(d.netAsset).toBe(830_000)
   })
 
   it('投資は実質資産に入らず、別枠で返る（不変条件1）', async () => {
@@ -87,11 +85,21 @@ describe('実質資産', () => {
     expect(d.investmentTotal).toBe(350_000)
   })
 
-  it('回収済みの立替は足さない', async () => {
+  it('立替は実質資産に入らず、別枠で返る（不変条件4）', async () => {
+    seedAccount('cash', 500_000)
+    seedLending(12_000, 0)
+
+    const d = await usecase.get()
+
+    expect(d.netAsset).toBe(500_000)
+    expect(d.outstandingLendings).toBe(12_000)
+  })
+
+  it('回収済みの立替は参考値にも足さない', async () => {
     seedAccount('cash', 500_000)
     seedLending(12_000, 12_000)
 
-    expect((await usecase.get()).breakdown.outstandingLendings).toBe(0)
+    expect((await usecase.get()).outstandingLendings).toBe(0)
   })
 
   it('確定以外のウィッシュは控除しない（不変条件3）', async () => {
@@ -107,6 +115,7 @@ describe('実質資産', () => {
     const d = await usecase.get()
     expect(d.netAsset).toBe(0)
     expect(d.investmentTotal).toBe(0)
+    expect(d.outstandingLendings).toBe(0)
     expect(d.wishes).toEqual([])
   })
 })

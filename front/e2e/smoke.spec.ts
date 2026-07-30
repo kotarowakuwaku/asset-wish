@@ -31,13 +31,13 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
   await page.route('**/api/dashboard', (route) =>
     route.fulfill({
       json: {
-        netAsset: 842000,
+        netAsset: 830000,
         breakdown: {
           cashTotal: 910000,
-          outstandingLendings: 12000,
           commitments: 80000,
         },
         investmentTotal: 350000,
+        outstandingLendings: 12000,
         averageSurplus: 65000,
         hasAverageSurplus: true,
         wishes: wishes.map((w) => ({

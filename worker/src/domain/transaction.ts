@@ -3,6 +3,9 @@ import { isZeroMoney, type Money } from './money'
 import type { IsoDate } from './time'
 
 export const TRANSACTION_KINDS = [
+  // 立替の2種は**もう新しく作られない。** 立替は口座残高を動かさなくなった
+  // ため（不変条件4）。2026-07-30 より前に作られた行を復元するために残して
+  // ある。ここから消すと、既存の履歴が読めなくなる。
   'lending_created', // 立替の発生。口座から出る
   'lending_collected', // 立替の回収。口座に戻る
   'wish_paid', // ウィッシュの支払い。口座から出る

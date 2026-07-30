@@ -133,17 +133,17 @@ export function createClient(token: string) {
       get<Lending[]>(
         `/api/lendings${outstandingOnly ? '?outstanding=true' : ''}`,
       ),
+    // accountId は送れない。立替は口座残高を動かさない（不変条件4）。
+    // 送るとサーバーが 400 を返す。
     createLending: (input: {
       counterparty: string
       description: string
       amount: number
       occurredOn: string
-      accountId: string
     }) => post<Lending>('/api/lendings', input),
-    collectLending: (
-      id: string,
-      input: { amount: number; occurredOn: string; accountId: string },
-    ) => post<Lending>(`/api/lendings/${id}/collect`, input),
+    // 回収日も送れない。口座を触らないので取引履歴が作られず、残す先が無い。
+    collectLending: (id: string, input: { amount: number }) =>
+      post<Lending>(`/api/lendings/${id}/collect`, input),
     deleteLending: (id: string) => del(`/api/lendings/${id}`),
 
     listWishes: (status?: WishStatus) =>

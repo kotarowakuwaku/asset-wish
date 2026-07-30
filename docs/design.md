@@ -16,6 +16,8 @@
 >
 > ただし、**3章のコード例は Go 版の記述**であり、実際のシグネチャは `worker/src/domain/` を見ること。移行で変わった点（`year_month` の型、時刻の持ち方、トランザクションの扱い）は `docs/migration-cloudflare.md` に集約してある。
 
+> **仕様変更について（2026-07-30）：** **立替を実質資産の計算から外した。** 実質資産は `現金・預金 − 確定支出` になり、未回収の立替は投資資産と同じ別枠の参考値になった。立替の登録・回収で口座残高は動かず、取引履歴も残らない。**この文書のうち 3.5 の計算式、4.4 のダッシュボード応答、4.4 の `/api/lendings` の入力、6.1 のテストケース表が影響を受ける**（該当箇所に注記を入れてある）。要件定義書は v1.1 が正。経緯と理由は `docs/spec-changes.md` の2章。
+
 ---
 
 ## 1. 全体構成
@@ -230,7 +232,7 @@ type Lending struct {
     OccurredOn      time.Time
 }
 
-// 未回収残高。実質資産への加算対象。
+// 未回収残高。**実質資産には加算しない**（2026-07-30 の変更）。別枠の参考値。
 func (l Lending) Outstanding() Money {
     return l.Amount.Sub(l.CollectedAmount)
 }
@@ -344,19 +346,19 @@ func (w *Wish) Drop() error {
 
 **本アプリの中核。外部依存を一切持たない純粋関数として実装する。**
 
+> **2026-07-30 の変更：** 下のコードは立替を加算していたときの記述。**現在は立替を加算しない。** 実際のシグネチャは `worker/src/domain/netAsset.ts` を見ること。`calculateBreakdown` は立替を引数に取らず、未回収の合計は `calculateOutstandingLendings` が別に返す。
+
 ```go
 // networth.go
 
-// 実質資産 = 現金預金 + 未回収立替 − 確定支出
-func CalculateNetAsset(accounts []Account, lendings []Lending, wishes []Wish) Money {
+// 実質資産 = 現金預金 − 確定支出
+// （2026-07-30 より前は、ここに未回収立替も加算していた）
+func CalculateNetAsset(accounts []Account, wishes []Wish) Money {
     var total Money
     for _, a := range accounts {
         if a.CountsTowardNetAsset() {
             total = total.Add(a.Balance)
         }
-    }
-    for _, l := range lendings {
-        total = total.Add(l.Outstanding())
     }
     for _, w := range wishes {
         if w.IsCommitment() {
@@ -368,6 +370,9 @@ func CalculateNetAsset(accounts []Account, lendings []Lending, wishes []Wish) Mo
 
 // 投資資産の合計（参考値。実質資産には含めない）
 func CalculateInvestmentTotal(accounts []Account) Money
+
+// 未回収立替の合計（参考値。実質資産には含めない）
+func CalculateOutstandingLendings(lendings []Lending) Money
 
 // 不足額 = ウィッシュ金額 − 実質資産
 func CalculateShortfall(wish Wish, netAsset Money) Money
@@ -436,13 +441,13 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 ```json
 {
-  "netAsset": 842000,
+  "netAsset": 830000,
   "breakdown": {
     "cashTotal": 910000,
-    "outstandingLendings": 12000,
     "commitments": 80000
   },
   "investmentTotal": 350000,
+  "outstandingLendings": 12000,
   "averageSurplus": 65000,
   "wishes": [
     {
@@ -459,13 +464,23 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 `monthsToReach` は算出不可の場合 `null` を返す。クライアント側は `null` を「算出不可」と表示する。
 
+`breakdown` に並ぶのは実質資産を構成する項目だけ。`investmentTotal` と `outstandingLendings` はどちらも実質資産の外の参考値なので、`breakdown` の外に置く。**合計に足されない値を内訳に混ぜない**という形で示している。
+
+**`POST /api/lendings`**
+
+```json
+{ "counterparty": "…", "description": "…", "amount": 12000, "occurredOn": "2026-07-26" }
+```
+
+**`accountId` は受け取らない。** 立替は口座残高を動かさない（2026-07-30 の変更）。送ると 400 を返す。黙って無視すると「口座を指定したのに残高が変わらない」と読める。
+
 **`POST /api/lendings/{id}/collect`**
 
 ```json
-{ "amount": 5000, "occurredOn": "2026-07-26", "accountId": "…" }
+{ "amount": 5000 }
 ```
 
-回収額が未回収残高を超える場合は 422 を返す。`accountId` は入金先の口座で、残高への反映と取引履歴の記録に使う。
+回収額が未回収残高を超える場合は 422 を返す。**`accountId` も `occurredOn` も受け取らない。** 口座を触らないため取引履歴が作られず、回収日を残す先が無い。
 
 **`PUT /api/monthly-balances/{yearMonth}`**
 
@@ -603,7 +618,9 @@ D1 が返す行（`WishRow` など）と、ドメインのエンティティ（`
 
 ### 5.3 書き込みの原子性
 
-複数テーブルを更新する操作（立替の回収 → 口座残高の更新 → 取引履歴の記録）は、**usecase が `WriteOperation` の配列として組み立て**、`AtomicWriter` が1回の `db.batch()` に流す。書き込みの制御を handler や repository に散らさない。
+複数テーブルを更新する操作（ウィッシュの支払い → 口座残高の更新 → 取引履歴の記録）は、**usecase が `WriteOperation` の配列として組み立て**、`AtomicWriter` が1回の `db.batch()` に流す。書き込みの制御を handler や repository に散らさない。
+
+立替は 2026-07-30 の変更で口座を触らなくなったため、書き込みは1行だけになった。それでも `AtomicWriter` を通しているのは、**回収に楽観ロックが要る**ため。読み取り時の回収額を条件にしないと、同時に2回回収したときに両方が未回収残高の範囲内に見えて過回収が成立する。その仕組みを持っているのが `AtomicWriter` である。
 
 D1 は `BEGIN` を受け付けないため、Go 版の `RunInTx` に相当するものは無い。`batch()` が1回の呼び出し＝1つのトランザクションとして働く。
 
@@ -645,8 +662,8 @@ front 側も worker 側も、上記すべてを単一のコマンドに束ねる
 | --- | --- | --- |
 | 1 | 現金のみ | 残高の合計がそのまま実質資産 |
 | 2 | 投資口座を含む | **投資分は加算されない** |
-| 3 | 未回収の立替あり | 未回収残高が加算される |
-| 4 | 一部回収済みの立替 | 未回収分のみ加算される |
+| 3 | 未回収の立替あり | **実質資産は変わらない。** 参考値として未回収残高が返る |
+| 4 | 一部回収済みの立替 | 参考値は未回収分のみ |
 | 5 | 確定ウィッシュあり | その金額が控除される |
 | 6 | 検討中ウィッシュのみ | 控除されない |
 | 7 | 完了・見送りのウィッシュ | 控除されない |

@@ -18,13 +18,15 @@ import {
   parseAmount,
   todayISO,
 } from '../lib/format'
-import { AccountSelect } from './AccountSelect'
 
 /**
  * Lendings は立替の一覧と、登録・回収・削除を行う。
  *
  * 未回収残高・回収状態はサーバーが導出した値をそのまま出す。
  * DB は回収額しか持たない（不変条件12）。
+ *
+ * **口座を選ばせない。** 立替は口座残高を動かさないため（不変条件4）。
+ * 未回収額はダッシュボードで参考値として出る。
  */
 export function Lendings({ client }: { client: ApiClient }) {
   const [outstandingOnly, setOutstandingOnly] = useState(true)
@@ -202,8 +204,6 @@ function CollectForm({
   onCollected: () => void
 }) {
   const [amount, setAmount] = useState('')
-  const [occurredOn, setOccurredOn] = useState(todayISO())
-  const [accountId, setAccountId] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -218,11 +218,7 @@ function CollectForm({
 
     setBusy(true)
     try {
-      await client.collectLending(lending.id, {
-        amount: parsed,
-        occurredOn,
-        accountId,
-      })
+      await client.collectLending(lending.id, { amount: parsed })
       setMessage(null)
       onCollected()
     } catch (e) {
@@ -247,22 +243,12 @@ function CollectForm({
         未回収残高は <Money amount={lending.outstanding} /> です。
       </p>
 
-      <Field label="入金先の口座">
-        <AccountSelect client={client} value={accountId} onChange={setAccountId} />
-      </Field>
-
-      <Field label="日付">
-        <input
-          type="date"
-          value={occurredOn}
-          onChange={(e) => setOccurredOn(e.target.value)}
-          required
-        />
-      </Field>
+      {/* 入金先の口座も回収日も聞かない。立替は口座残高を動かさず、
+          取引履歴も残さない（不変条件4）。日付を聞いても残す先が無い。 */}
 
       <FormError message={message} />
 
-      <button type="submit" disabled={busy || accountId === ''}>
+      <button type="submit" disabled={busy}>
         回収を記録する
       </button>
     </form>
@@ -280,7 +266,6 @@ function NewLendingForm({
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [occurredOn, setOccurredOn] = useState(todayISO())
-  const [accountId, setAccountId] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -300,7 +285,6 @@ function NewLendingForm({
         description,
         amount: parsed,
         occurredOn,
-        accountId,
       })
       setCounterparty('')
       setDescription('')
@@ -343,10 +327,9 @@ function NewLendingForm({
         />
       </Field>
 
-      {/* 立て替えた時点で口座から金は出ている。残高もあわせて減る。 */}
-      <Field label="支払い元の口座">
-        <AccountSelect client={client} value={accountId} onChange={setAccountId} />
-      </Field>
+      {/* 支払い元の口座は聞かない。立て替えた時点で現金が出たとは限らない
+          （カード払いなら引き落としはまだ）。未回収額はダッシュボードの
+          参考値として出るだけで、口座残高は動かさない（不変条件4）。 */}
 
       <Field label="日付">
         <input
@@ -359,7 +342,7 @@ function NewLendingForm({
 
       <FormError message={message} />
 
-      <button type="submit" disabled={busy || accountId === ''}>
+      <button type="submit" disabled={busy}>
         登録する
       </button>
     </form>

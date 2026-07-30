@@ -128,28 +128,27 @@ export function createApp(deps: Deps) {
     return c.json(lendings.map(lendingResponse))
   })
 
+  // accountId を受け取らない。立替は口座残高を動かさない（不変条件4）。
+  // 未知の項目は 400 になるので、accountId を送れば 400 で返る。黙って
+  // 無視すると「口座を指定したのに残高が変わらない」と読める。
   app.post('/api/lendings', async (c) => {
-    const body = await readBody(c, ['counterparty', 'description', 'amount', 'occurredOn', 'accountId'])
+    const body = await readBody(c, ['counterparty', 'description', 'amount', 'occurredOn'])
     const l = await deps.lendings.create(
       readString(body, 'counterparty', ''),
       readString(body, 'description', ''),
       readMoney(body, 'amount', 0),
       readDate(body, 'occurredOn'),
-      readUuid(body, 'accountId'),
     )
     return c.json(lendingResponse(l), 201)
   })
 
   // 未回収残高を超える額は 422（COLLECT_EXCEEDS_OUTSTANDING）になる。
+  // occurredOn も受け取らない。口座を触らないので取引履歴が作られず、
+  // 回収日を残す先が無い。
   app.post('/api/lendings/:id/collect', async (c) => {
     const id = parseUuid(c.req.param('id'), 'id')
-    const body = await readBody(c, ['amount', 'occurredOn', 'accountId'])
-    const l = await deps.lendings.collect(
-      id,
-      readMoney(body, 'amount', 0),
-      readDate(body, 'occurredOn'),
-      readUuid(body, 'accountId'),
-    )
+    const body = await readBody(c, ['amount'])
+    const l = await deps.lendings.collect(id, readMoney(body, 'amount', 0))
     return c.json(lendingResponse(l))
   })
 

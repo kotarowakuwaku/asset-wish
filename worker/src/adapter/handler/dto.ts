@@ -79,10 +79,13 @@ export function dashboardResponse(d: Dashboard) {
     netAsset: d.netAsset,
     breakdown: {
       cashTotal: d.breakdown.cashTotal,
-      outstandingLendings: d.breakdown.outstandingLendings,
       commitments: d.breakdown.commitments,
     },
+    // investmentTotal と outstandingLendings はどちらも実質資産の外の参考値。
+    // breakdown に混ぜないのは、合計に足されない値だと形で示すため
+    // （不変条件1・4）。
     investmentTotal: d.investmentTotal,
+    outstandingLendings: d.outstandingLendings,
     // 算出不可のときは 0 を返すが、hasAverageSurplus が false なので
     // クライアントは表示しない。
     averageSurplus: d.averageSurplus ?? 0,

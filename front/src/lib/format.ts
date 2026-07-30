@@ -101,6 +101,8 @@ export function accountKindLabel(kind: string): string {
 }
 
 const transactionKindLabels: Record<string, string> = {
+  // 立替の2種はもう新しく作られない。立替は口座残高を動かさなくなったため
+  // （不変条件4）。2026-07-30 より前の履歴を表示するために残してある。
   lending_created: '立替の発生',
   lending_collected: '立替の回収',
   wish_paid: 'ウィッシュの支払い',

@@ -72,7 +72,7 @@ describe('エラーの変換', () => {
     )
 
     const err = (await createClient(token)
-      .collectLending('id', { amount: 1, occurredOn: '2026-07-20', accountId: 'a' })
+      .collectLending('id', { amount: 1 })
       .catch((e: unknown) => e)) as ApiError
 
     expect(err.isDomainError).toBe(true)

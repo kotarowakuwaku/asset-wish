@@ -39,17 +39,13 @@ export function Dashboard({ client }: { client: ApiClient }) {
         <p className="net-asset-value">
           <Money amount={data.netAsset} />
         </p>
+        {/* 内訳に並ぶのは実質資産を構成する項目だけ。立替と投資は
+            実質資産の外の参考値なので、この dl には入れない。 */}
         <dl className="breakdown">
           <div>
             <dt>現金・預金</dt>
             <dd>
               <Money amount={data.breakdown.cashTotal} />
-            </dd>
-          </div>
-          <div>
-            <dt>未回収の立替</dt>
-            <dd>
-              +<Money amount={data.breakdown.outstandingLendings} />
             </dd>
           </div>
           <div>
@@ -60,6 +56,19 @@ export function Dashboard({ client }: { client: ApiClient }) {
           </div>
         </dl>
       </section>
+
+      {/* 実質資産には足さない参考値（不変条件4）。立て替えた時点で現金が
+          出たとは限らないため（カード払いなら引き落としはまだ）、
+          「返ってくる予定の額」として横に置くだけにしている。 */}
+      <Section title="未回収の立替">
+        {data.outstandingLendings > 0 ? (
+          <p className="reference-value">
+            <Money amount={data.outstandingLendings} />
+          </p>
+        ) : (
+          <Empty>未回収の立替はありません。</Empty>
+        )}
+      </Section>
 
       <Section title="平均月間余剰">
         {data.hasAverageSurplus ? (

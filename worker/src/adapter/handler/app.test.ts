@@ -59,9 +59,10 @@ describe('GET /api/dashboard', () => {
 
     expect(status).toBe(200)
     expect(body).toEqual({
-      netAsset: 842_000,
-      breakdown: { cashTotal: 910_000, outstandingLendings: 12_000, commitments: 80_000 },
+      netAsset: 830_000,
+      breakdown: { cashTotal: 910_000, commitments: 80_000 },
       investmentTotal: 350_000,
+      outstandingLendings: 12_000,
       averageSurplus: 60_000,
       hasAverageSurplus: true,
       wishes: [
@@ -87,9 +88,10 @@ describe('GET /api/dashboard', () => {
     const { app } = makeApp({
       dashboard: {
         get: async () => ({
-          breakdown: { cashTotal: yen(0), outstandingLendings: yen(0), commitments: yen(0) },
+          breakdown: { cashTotal: yen(0), commitments: yen(0) },
           netAsset: yen(0),
           investmentTotal: yen(0),
+          outstandingLendings: yen(0),
           averageSurplus: null,
           wishes: [],
         }),
@@ -202,10 +204,23 @@ describe('立替', () => {
         description: '',
         amount: 12_000,
         occurredOn: '2026-07-12',
-        accountId: OTHER_ID,
       }),
     )
     expect(status).toBe(201)
+  })
+
+  it('POST は相手・内容・金額・日付をそのまま渡す', async () => {
+    const { app, deps } = makeApp()
+    await app.request(
+      '/api/lendings',
+      jsonRequest('POST', {
+        counterparty: 'テスト相手',
+        description: 'メモ',
+        amount: 12_000,
+        occurredOn: '2026-07-12',
+      }),
+    )
+    expect(deps.calls['lendings.create']).toEqual(['テスト相手', 'メモ', 12_000, '2026-07-12'])
   })
 
   it('日付の形式が不正なら 400', async () => {
@@ -215,7 +230,6 @@ describe('立替', () => {
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026/07/12',
-        accountId: OTHER_ID,
       }),
     )
     expect(status).toBe(400)
@@ -229,7 +243,6 @@ describe('立替', () => {
         counterparty: 'テスト相手',
         amount: 12_000,
         occurredOn: '2026-02-31',
-        accountId: OTHER_ID,
       }),
     )
     expect(status).toBe(400)
@@ -243,6 +256,21 @@ describe('立替', () => {
         counterparty: 'テスト相手',
         amount: 100.5,
         occurredOn: '2026-07-12',
+      }),
+    )
+    expect(status).toBe(400)
+    expect((body as { error: { code: string } }).error.code).toBe('INVALID_BODY')
+  })
+
+  // 立替は口座残高を動かさない（不変条件4）。黙って無視すると
+  // 「口座を指定したのに残高が変わらない」と読める。
+  it('POST で accountId を送ると 400（黙って無視しない）', async () => {
+    const { status, body } = await call(
+      '/api/lendings',
+      jsonRequest('POST', {
+        counterparty: 'テスト相手',
+        amount: 12_000,
+        occurredOn: '2026-07-12',
         accountId: OTHER_ID,
       }),
     )
@@ -250,26 +278,25 @@ describe('立替', () => {
     expect((body as { error: { code: string } }).error.code).toBe('INVALID_BODY')
   })
 
-  it('accountId の形式が不正なら 400', async () => {
-    const { status, body } = await call(
-      '/api/lendings',
-      jsonRequest('POST', {
-        counterparty: 'テスト相手',
-        amount: 12_000,
-        occurredOn: '2026-07-12',
-        accountId: 'not-a-uuid',
-      }),
+  it('回収は 200 を返し、金額だけを渡す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request(
+      `/api/lendings/${TEST_ID}/collect`,
+      jsonRequest('POST', { amount: 5_000 }),
     )
-    expect(status).toBe(400)
-    expect((body as { error: { code: string } }).error.code).toBe('INVALID_ID')
+    expect(res.status).toBe(200)
+    expect(deps.calls['lendings.collect']).toEqual([TEST_ID, 5_000])
   })
 
-  it('回収は 200 を返す', async () => {
-    const { status } = await call(
-      `/api/lendings/${TEST_ID}/collect`,
-      jsonRequest('POST', { amount: 5_000, occurredOn: '2026-07-12', accountId: OTHER_ID }),
-    )
-    expect(status).toBe(200)
+  // 回収日を残す先が無い（取引履歴が作られない）。
+  it('回収で accountId や occurredOn を送ると 400', async () => {
+    for (const extra of [{ accountId: OTHER_ID }, { occurredOn: '2026-07-12' }]) {
+      const { status } = await call(
+        `/api/lendings/${TEST_ID}/collect`,
+        jsonRequest('POST', { amount: 5_000, ...extra }),
+      )
+      expect(status).toBe(400)
+    }
   })
 })
 

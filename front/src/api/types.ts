@@ -84,13 +84,18 @@ export type DashboardWish = Wish & {
 
 export type Dashboard = {
   netAsset: number
+  /** 実質資産を構成する項目だけ。参考値は下に別で並ぶ。 */
   breakdown: {
     cashTotal: number
-    outstandingLendings: number
     commitments: number
   }
   /** 投資は実質資産に含めない別枠の参考値。 */
   investmentTotal: number
+  /**
+   * 未回収の立替。**これも実質資産には含めない別枠の参考値。**
+   * 立て替えた時点で現金が出たとは限らないため（カード払い）。
+   */
+  outstandingLendings: number
   averageSurplus: number
   /** false のとき averageSurplus は 0 が入るが、表示してはいけない。 */
   hasAverageSurplus: boolean

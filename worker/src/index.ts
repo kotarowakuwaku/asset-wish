@@ -43,7 +43,8 @@ export function buildDeps(env: Env): Deps {
 
   return {
     accounts: new AccountUsecase(accountRepo, now, newID),
-    lendings: new LendingUsecase(writer, lendingRepo, accountRepo, now, newID),
+    // 立替は口座を触らない（不変条件4）。accountRepo も Clock も要らない。
+    lendings: new LendingUsecase(writer, lendingRepo, newID),
     wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
     balances: new MonthlyBalanceUsecase(balanceRepo, newID),
     transactions: new TransactionUsecase(transactionRepo),

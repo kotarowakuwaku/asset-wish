@@ -11,24 +11,27 @@ export const AVERAGE_SURPLUS_MONTHS = 3
 /**
  * 実質資産の内訳。
  * ダッシュボードで内訳表示するため、合計値だけでなく構成要素も保持する。
+ *
+ * **未回収の立替はここに入れない。** 立替は実質資産の外の参考値になった
+ * （不変条件4）。この型に持たせたまま netAsset() で無視すると、「内訳に
+ * あるのに合計に入っていない項目」ができ、あとから足し戻されうる。
+ * 全フィールドを必ず使う形にしておけば、その事故が起こらない。
  */
 export type NetAssetBreakdown = {
   /** 現金・預金の残高合計。 */
   cashTotal: Money
-  /** 未回収立替の合計。 */
-  outstandingLendings: Money
   /** 確定支出の合計（正の値で保持）。 */
   commitments: Money
 }
 
 /**
- * 実質資産。cashTotal + outstandingLendings - commitments。
+ * 実質資産。cashTotal - commitments。
  *
  * commitments を正で保持して減算するのは、表示時に「確定支出: 80,000円」と
  * 出したいため。符号反転を1箇所に閉じ込める。
  */
 export function netAsset(b: NetAssetBreakdown): Money {
-  return subMoney(addMoney(b.cashTotal, b.outstandingLendings), b.commitments)
+  return subMoney(b.cashTotal, b.commitments)
 }
 
 /**
@@ -37,28 +40,26 @@ export function netAsset(b: NetAssetBreakdown): Money {
  * 不変条件:
  *   - kind が investment の口座は cashTotal に含めない（不変条件1）
  *   - status が committed 以外のウィッシュは commitments に含めない（不変条件3）
- *   - 立替は回収済みの分を除いた未回収残高のみを加算する（不変条件4）
+ *
+ * 立替を受け取らないのは、実質資産に一切関与しなくなったため。引数に残すと
+ * 「使わない引数」ができ、読む側が関与を疑う。参考値は
+ * calculateOutstandingLendings が別に出す。
  */
 export function calculateBreakdown(
   accounts: readonly Account[],
-  lendings: readonly Lending[],
   wishes: readonly Wish[],
 ): NetAssetBreakdown {
   let cashTotal = ZERO_MONEY
-  let outstandingLendings = ZERO_MONEY
   let commitments = ZERO_MONEY
 
   for (const a of accounts) {
     if (a.countsTowardNetAsset()) cashTotal = addMoney(cashTotal, a.balance)
   }
-  for (const l of lendings) {
-    outstandingLendings = addMoney(outstandingLendings, l.outstanding())
-  }
   for (const w of wishes) {
     if (w.isCommitment()) commitments = addMoney(commitments, w.amount)
   }
 
-  return { cashTotal, outstandingLendings, commitments }
+  return { cashTotal, commitments }
 }
 
 /**
@@ -69,6 +70,22 @@ export function calculateInvestmentTotal(accounts: readonly Account[]): Money {
   let total = ZERO_MONEY
   for (const a of accounts) {
     if (a.kind === 'investment') total = addMoney(total, a.balance)
+  }
+  return total
+}
+
+/**
+ * 未回収の立替の合計を返す。
+ *
+ * **実質資産には含めない。投資資産と同じ、別枠の参考値である（不変条件4）。**
+ * 立て替えた時点で現金が出たとは限らない（カード払いなら引き落としはまだ）。
+ * 「立替 ＝ 現金が出た」と決め打ちできないため、残高にも実質資産にも触らせず、
+ * 「相手から返ってくる予定の額」として横に置くだけにする。
+ */
+export function calculateOutstandingLendings(lendings: readonly Lending[]): Money {
+  let total = ZERO_MONEY
+  for (const l of lendings) {
+    total = addMoney(total, l.outstanding())
   }
   return total
 }

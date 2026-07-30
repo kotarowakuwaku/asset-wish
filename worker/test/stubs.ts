@@ -62,9 +62,10 @@ export function aTransaction(): Transaction {
 
 export function aDashboard(): Dashboard {
   return {
-    breakdown: { cashTotal: yen(910_000), outstandingLendings: yen(12_000), commitments: yen(80_000) },
-    netAsset: yen(842_000),
+    breakdown: { cashTotal: yen(910_000), commitments: yen(80_000) },
+    netAsset: yen(830_000),
     investmentTotal: yen(350_000),
+    outstandingLendings: yen(12_000),
     averageSurplus: yen(60_000),
     wishes: [
       { wish: aWish(), shortfall: yen(358_000), monthsToReach: 6, monthlySavingNeeded: yen(59_667) },

@@ -6,6 +6,7 @@ import {
   averageSurplus,
   calculateBreakdown,
   calculateInvestmentTotal,
+  calculateOutstandingLendings,
   calculateShortfall,
   monthlySavingNeeded,
   monthsToReach,
@@ -18,10 +19,8 @@ describe('calculateBreakdown', () => {
   const cases: {
     name: string
     accounts?: Account[]
-    lendings?: Lending[]
     wishes?: Wish[]
     wantCash?: number
-    wantLent?: number
     wantCommit?: number
     wantNet?: number
   }[] = [
@@ -35,30 +34,6 @@ describe('calculateBreakdown', () => {
       name: 'A-2: investment excluded',
       accounts: [acct('cash', 500_000), acct('investment', 400_000)],
       wantCash: 500_000,
-      wantNet: 500_000,
-    },
-    {
-      name: 'A-3: outstanding lending added',
-      accounts: [acct('cash', 500_000)],
-      lendings: [lend(12_000, 0)],
-      wantCash: 500_000,
-      wantLent: 12_000,
-      wantNet: 512_000,
-    },
-    {
-      name: 'A-4: partially collected lending',
-      accounts: [acct('cash', 500_000)],
-      lendings: [lend(12_000, 5_000)],
-      wantCash: 500_000,
-      wantLent: 7_000,
-      wantNet: 507_000,
-    },
-    {
-      name: 'A-5: fully collected lending',
-      accounts: [acct('cash', 500_000)],
-      lendings: [lend(12_000, 12_000)],
-      wantCash: 500_000,
-      wantLent: 0,
       wantNet: 500_000,
     },
     {
@@ -94,19 +69,16 @@ describe('calculateBreakdown', () => {
     {
       name: 'A-11: combined dashboard example',
       accounts: [acct('cash', 910_000), acct('investment', 350_000)],
-      lendings: [lend(12_000, 0)],
       wishes: [wish(80_000, 'committed')],
       wantCash: 910_000,
-      wantLent: 12_000,
       wantCommit: 80_000,
-      wantNet: 842_000,
+      wantNet: 830_000,
     },
   ]
 
   it.each(cases)('$name', (c) => {
-    const b = calculateBreakdown(c.accounts ?? [], c.lendings ?? [], c.wishes ?? [])
+    const b = calculateBreakdown(c.accounts ?? [], c.wishes ?? [])
     expect(b.cashTotal).toBe(c.wantCash ?? 0)
-    expect(b.outstandingLendings).toBe(c.wantLent ?? 0)
     expect(b.commitments).toBe(c.wantCommit ?? 0)
     expect(netAsset(b)).toBe(c.wantNet ?? 0)
   })
@@ -120,6 +92,26 @@ describe('calculateInvestmentTotal', () => {
 
   it('空なら 0', () => {
     expect(calculateInvestmentTotal([])).toBe(0)
+  })
+})
+
+// 立替は実質資産の外の参考値（不変条件4）。ここが壊れると、カードで
+// 立て替えた分だけ資産が多く見える。
+describe('calculateOutstandingLendings', () => {
+  const cases: { name: string; lendings: Lending[]; want: number }[] = [
+    { name: 'A-3: 未回収は全額が残高になる', lendings: [lend(12_000, 0)], want: 12_000 },
+    { name: 'A-4: 一部回収なら残りだけ', lendings: [lend(12_000, 5_000)], want: 7_000 },
+    { name: 'A-5: 全額回収なら 0', lendings: [lend(12_000, 12_000)], want: 0 },
+    {
+      name: 'A-12: 複数件を合計する',
+      lendings: [lend(12_000, 0), lend(8_000, 3_000)],
+      want: 17_000,
+    },
+    { name: 'A-13: 空なら 0', lendings: [], want: 0 },
+  ]
+
+  it.each(cases)('$name', (c) => {
+    expect(calculateOutstandingLendings(c.lendings)).toBe(c.want)
   })
 })
 
