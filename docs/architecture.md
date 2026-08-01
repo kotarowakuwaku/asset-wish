@@ -85,7 +85,7 @@ handler ──▶ usecase ──▶ domain
 | --- | --- |
 | `domain/` の値オブジェクト | `money` / `yearMonth` / `time`。他の domain に依存しない |
 | `domain/` の集約 | `account` / `loan` / `wish` / `transaction` / `recurring` / `monthlyBalance` |
-| `domain/` のサービス | `netAsset`（実質資産と参考値）/ `wishProgress`（不足額と到達）/ `monthlySummary`（月次の集計と平均） |
+| `domain/` のサービス | `netAsset`（残高の3時点と参考値）/ `wishProgress`（不足額と到達）/ `monthlySummary`（月次の集計と平均） |
 | `front/screens/` | **router が切り替える単位だけ。** 部品を置かない |
 | `front/components/` | 複数の画面から使う部品（`AccountSelect` など） |
 | `front/app/` | 画面に依らない基盤（`router` / `token` / `useAsync` / `useSubmit`） |

@@ -42,6 +42,7 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
         outstandingBorrowed: 5000,
         averageSurplus: 65000,
         hasAverageSurplus: true,
+        projectedBalance: 1080000,
         pendingRecurringCount: 0,
         pendingRecurringTotal: 0,
         wishes: wishes.map((w) => ({
@@ -150,7 +151,7 @@ test('トークンを入れるとダッシュボードが開く', async ({ page 
   await setupApi(page)
   await signIn(page)
 
-  await expect(page.getByRole('heading', { name: '実質資産' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今ある額' })).toBeVisible()
 })
 
 test('画面を切り替えられる', async ({ page }) => {
