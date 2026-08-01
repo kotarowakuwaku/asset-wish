@@ -154,6 +154,26 @@ gh pr checks <番号>
 
 **CI が赤いまま「出しました」と言わない。**
 
+### PR を出したあとに追加で直すとき
+
+**まず、その PR がまだ open か確認する。**
+
+```bash
+gh pr view <番号> --json state --jq .state
+```
+
+マージ済みなら、ブランチに push しても**その PR には乗らない**（head が固定される）。`git push` は成功し、`git ls-remote` にも新しいコミットが見えるので、**成功したように見えて実際は取りこぼす。**
+
+マージ済みだった場合は、main から切り直して別の PR にする。
+
+```bash
+git checkout main && git pull
+git checkout -b <prefix>/<説明>
+git cherry-pick <取りこぼしたコミット>
+```
+
+**「push が反映されない」と GitHub 側を疑う前に、PR の状態を見ること。** 実際にこれで時間を溶かした。
+
 ---
 
 ## やらないこと
