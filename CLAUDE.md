@@ -17,7 +17,7 @@
 - `docs/requirements.md` — 要件定義書 v1.0（決定事項と、却下した選択肢の理由を含む）
 - `docs/design.md` — 設計書（DDL、ドメイン型、API、パッケージ構成、テスト方針）
 - `docs/migration-cloudflare.md` — Go から TypeScript への移行の記録。**実測で分かった D1 の癖はここに集約されている**
-- `docs/spec-changes.md` — **使ってみて出た仕様変更。進行中。** 残り4本の計画と、着手前に決めるべき論点がある
+- `docs/spec-changes.md` — **使ってみて出た仕様変更。進行中。** 残り2本の計画と、着手前に決めるべき論点がある
 
 ## 開発上の目的
 

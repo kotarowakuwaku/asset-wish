@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db, givenAccount, givenTransaction, resetDb } from '../../../test/db'
 import { expectDomainError, id, SOME_DATE } from '../../../test/support'
-import { D1TransactionRepository, toTransaction } from './transaction'
+import { NotFoundError } from '../../usecase/port'
+import { D1TransactionRepository, deleteTransactionStatement, toTransaction } from './transaction'
 
 const repo = new D1TransactionRepository(db)
 
@@ -32,9 +33,9 @@ describe('list', () => {
     expect(await repo.list(0)).toHaveLength(2)
   })
 
-  it('符号と種別がそのまま戻る', async () => {
+  it('符号と種別とメモがそのまま戻る', async () => {
     const a = await givenAccount()
-    await givenTransaction(a.id, { amount: -300, kind: 'adjustment' })
+    await givenTransaction(a.id, { amount: -300, kind: 'adjustment', note: 'コンビニ' })
 
     const [t] = await repo.list(100)
     expect(t.amount).toBe(-300)
@@ -42,10 +43,41 @@ describe('list', () => {
     expect(t.refId).toBeNull()
     expect(t.accountId).toBe(a.id)
     expect(t.occurredOn).toBe(SOME_DATE)
+    expect(t.note).toBe('コンビニ')
   })
 
   it('空なら空配列', async () => {
     expect(await repo.list(100)).toEqual([])
+  })
+})
+
+describe('get', () => {
+  it('1件を復元して返す', async () => {
+    const a = await givenAccount()
+    const t = await givenTransaction(a.id, { amount: -3_000, note: 'コンビニ' })
+
+    const got = await repo.get(t.id)
+    expect(got.id).toBe(t.id)
+    expect(got.amount).toBe(-3_000)
+    expect(got.note).toBe('コンビニ')
+  })
+
+  it('無ければ NotFoundError', async () => {
+    await expect(repo.get(id())).rejects.toThrow(NotFoundError)
+  })
+})
+
+describe('deleteTransactionStatement', () => {
+  it('1件消える', async () => {
+    const a = await givenAccount()
+    const t = await givenTransaction(a.id)
+    await givenTransaction(a.id)
+
+    await deleteTransactionStatement(db, t, false).run()
+
+    const rest = await repo.list(100)
+    expect(rest).toHaveLength(1)
+    expect(rest[0].id).not.toBe(t.id)
   })
 })
 
@@ -72,6 +104,7 @@ describe('toTransaction', () => {
     kind: 'adjustment',
     ref_id: null,
     occurred_on: '2026-07-12',
+    note: 'コンビニ',
   }
 
   it('未知の種別は復元しない', () => {

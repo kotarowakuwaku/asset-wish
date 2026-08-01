@@ -292,6 +292,33 @@ export function createApp(deps: Deps) {
     return c.json(transactions.map(transactionResponse))
   })
 
+  /**
+   * 入出金の明細を1件打つ。口座残高が同額だけ動き、履歴が残る。
+   *
+   * amount は符号付き。出金は負、入金は正。0 は 422（INVALID_AMOUNT）。
+   * kind を受け取らないのは、ここで作れるのが手入力の明細だけのため。
+   * 送れば 400 で返る。ウィッシュや貸し借りの履歴は、それぞれの経路が作る。
+   *
+   * 分類（カテゴリ）は持たない。何に使ったかは note に書く。
+   */
+  app.post('/api/transactions', async (c) => {
+    const body = await readBody(c, ['accountId', 'amount', 'occurredOn', 'note'])
+    const t = await deps.transactions.create(
+      readUuid(body, 'accountId'),
+      readMoney(body, 'amount', 0),
+      readDate(body, 'occurredOn'),
+      readString(body, 'note', ''),
+    )
+    return c.json(transactionResponse(t), 201)
+  })
+
+  // 消せるのは手入力の明細だけ。ウィッシュや貸し借りに紐づく履歴は 422
+  // （TRANSACTION_NOT_DELETABLE）。判定は domain が持つ。
+  app.delete('/api/transactions/:id', async (c) => {
+    await deps.transactions.delete(parseUuid(c.req.param('id'), 'id'))
+    return c.body(null, 204)
+  })
+
   app.all('/api/*', (c) => {
     return c.json({ error: { code: 'NOT_FOUND', message: '対象が見つかりません' } }, 404)
   })

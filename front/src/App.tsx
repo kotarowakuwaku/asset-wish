@@ -7,6 +7,7 @@ import { Accounts } from './screens/Accounts'
 import { Dashboard } from './screens/Dashboard'
 import { Loans } from './screens/Loans'
 import { MonthlyBalances } from './screens/MonthlyBalances'
+import { Transactions } from './screens/Transactions'
 import { Wishes } from './screens/Wishes'
 
 /**
@@ -69,6 +70,7 @@ function App() {
       <main>
         {route === 'dashboard' && <Dashboard client={client} />}
         {route === 'accounts' && <Accounts client={client} />}
+        {route === 'transactions' && <Transactions client={client} />}
         {route === 'loans' && <Loans client={client} />}
         {route === 'wishes' && <Wishes client={client} />}
         {route === 'monthly-balances' && <MonthlyBalances client={client} />}

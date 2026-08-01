@@ -27,6 +27,7 @@ type Wish = {
 /** setupApi は API の応答を差し替える。状態はブラウザの外（この配列）で持つ。 */
 async function setupApi(page: Page, initialWishes: Wish[] = []) {
   const wishes = [...initialWishes]
+  const transactions: Record<string, unknown>[] = []
 
   await page.route('**/api/dashboard', (route) =>
     route.fulfill({
@@ -67,6 +68,34 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
   )
 
   await page.route('**/api/loans*', (route) => route.fulfill({ json: [] }))
+
+  // 入出金は状態を持つ。打った明細が一覧に出ることを見たいため。
+  await page.route('**/api/transactions**', async (route) => {
+    const request = route.request()
+
+    if (request.method() === 'POST') {
+      const body = request.postDataJSON() as {
+        accountId: string
+        amount: number
+        occurredOn: string
+        note: string
+      }
+      const created = {
+        id: `tx-${transactions.length + 1}`,
+        accountId: body.accountId,
+        amount: body.amount,
+        kind: 'adjustment',
+        refId: null,
+        occurredOn: body.occurredOn,
+        note: body.note,
+      }
+      transactions.push(created)
+      await route.fulfill({ json: created })
+      return
+    }
+
+    await route.fulfill({ json: transactions })
+  })
   await page.route('**/api/monthly-balances*', (route) =>
     route.fulfill({ json: [] }),
   )
@@ -125,7 +154,13 @@ test('画面を切り替えられる', async ({ page }) => {
   await setupApi(page)
   await signIn(page)
 
-  for (const label of ['口座', '貸し借り', 'ウィッシュ', '月次収支'] as const) {
+  for (const label of [
+    '口座',
+    '入出金',
+    '貸し借り',
+    'ウィッシュ',
+    '月次収支',
+  ] as const) {
     await page.getByRole('button', { name: label, exact: true }).click()
     await expect(
       page.getByRole('heading', { name: label, exact: true }),
@@ -173,6 +208,23 @@ test('確定のボタンが効く', async ({ page }) => {
   await expect(item.getByText('確定', { exact: true })).toBeVisible()
   // 確定済みには「確定する」を出さない。
   await expect(page.getByRole('button', { name: '確定する' })).toHaveCount(0)
+})
+
+test('入出金を打つと一覧に出る', async ({ page }) => {
+  await setupApi(page)
+  await signIn(page)
+
+  await page.getByRole('button', { name: '入出金', exact: true }).click()
+  await expect(page.getByText('入出金がまだありません。')).toBeVisible()
+
+  await page.getByLabel('金額').fill('3000')
+  await page.getByLabel('メモ').fill('コンビニ')
+  await page.getByRole('button', { name: '打つ' }).click()
+
+  const item = page.getByRole('listitem').filter({ hasText: 'コンビニ' })
+  await expect(item).toBeVisible()
+  // 出金は負で送られ、負のまま戻る。符号がそのまま向きを表す。
+  await expect(item.getByText('-¥3,000')).toBeVisible()
 })
 
 test('トークンが無ければ入力を求める', async ({ page }) => {

@@ -60,8 +60,12 @@ export type MonthlyBalanceService = {
   upsert(yearMonth: YearMonth, income: Money, expense: Money): Promise<MonthlyBalance>
 }
 
+// 明細の登録は口座残高を動かす。金額は符号付きで受ける（出金は負）。
+// 向きを別の項目にしないのは、一覧も符号付きで返しているため。
 export type TransactionService = {
   list(limit: number): Promise<Transaction[]>
+  create(accountId: string, amount: Money, occurredOn: IsoDate, note: string): Promise<Transaction>
+  delete(id: string): Promise<void>
 }
 
 export type DashboardService = {

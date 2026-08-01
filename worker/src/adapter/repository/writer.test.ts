@@ -40,6 +40,7 @@ describe('貸し借りの作成（口座残高の減算と履歴を伴う）', (
           'lending_created',
           loan.id,
           SOME_DATE,
+          '',
         ),
       },
     ])
@@ -69,6 +70,7 @@ describe('貸し借りの作成（口座残高の減算と履歴を伴う）', (
           'lending_created',
           loan.id,
           SOME_DATE,
+          '',
         ),
       },
     ])
@@ -100,6 +102,7 @@ describe('貸し借りの精算（前提条件が2つある）', () => {
           'lending_collected',
           loan.id,
           SOME_DATE,
+          '',
         ),
       },
     ]
@@ -151,7 +154,7 @@ describe('ウィッシュの支払い（状態の前提）', () => {
       { kind: 'updateAccount', account, expectedBalance: before },
       {
         kind: 'createTransaction',
-        transaction: Transaction.create(id(), account.id, yen(-80_000), 'wish_paid', wish.id, SOME_DATE),
+        transaction: Transaction.create(id(), account.id, yen(-80_000), 'wish_paid', wish.id, SOME_DATE, ''),
       },
     ])
 
@@ -172,7 +175,7 @@ describe('ウィッシュの支払い（状態の前提）', () => {
       { kind: 'updateAccount', account, expectedBalance: before },
       {
         kind: 'createTransaction',
-        transaction: Transaction.create(id(), account.id, yen(-80_000), 'wish_paid', wish.id, SOME_DATE),
+        transaction: Transaction.create(id(), account.id, yen(-80_000), 'wish_paid', wish.id, SOME_DATE, ''),
       },
     ])
 
@@ -198,6 +201,7 @@ describe('前提条件が無い場合', () => {
           'lending_created',
           loan.id,
           SOME_DATE,
+          '',
         ),
       },
     ])

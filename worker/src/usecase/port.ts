@@ -122,7 +122,11 @@ export interface MonthlyBalanceRepository {
 export interface TransactionRepository {
   /** 発生日の降順で最大 limit 件を返す。 */
   list(limit: number): Promise<Transaction[]>
+  /** 見つからなければ NotFoundError。 */
+  get(id: string): Promise<Transaction>
 }
+// 作成と削除がここに無いのは、どちらも口座残高の増減と同じ batch に載るため。
+// 単独で書ける経路を残すと、履歴だけが増えて残高が動かない状態を作れる（不変条件10）。
 
 /**
  * まとめて書き込む操作。
@@ -141,6 +145,7 @@ export type WriteOperation =
   | { kind: 'updateWishStatus'; wish: Wish; expectedStatus: WishStatus }
   | { kind: 'updateAccount'; account: Account; expectedBalance: Money }
   | { kind: 'createTransaction'; transaction: Transaction }
+  | { kind: 'deleteTransaction'; transaction: Transaction }
 
 export interface AtomicWriter {
   /**

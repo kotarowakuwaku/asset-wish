@@ -97,7 +97,7 @@ export async function givenWish(
 /** 取引履歴を1件入れて返す。 */
 export async function givenTransaction(
   accountId: string,
-  overrides: { amount?: number; kind?: 'adjustment'; occurredOn?: string } = {},
+  overrides: { amount?: number; kind?: 'adjustment'; occurredOn?: string; note?: string } = {},
 ): Promise<Transaction> {
   const t = Transaction.create(
     id(),
@@ -106,6 +106,7 @@ export async function givenTransaction(
     overrides.kind ?? 'adjustment',
     null,
     overrides.occurredOn === undefined ? SOME_DATE : isoDateOf(overrides.occurredOn),
+    overrides.note ?? '',
   )
   await insertTransactionStatement(db, t, false).run()
   return t

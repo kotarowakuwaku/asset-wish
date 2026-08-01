@@ -126,6 +126,8 @@ export class WishUsecase {
           'wish_paid',
           wish.id,
           occurredOn,
+          // メモは手入力の明細のためのもの。参照先をたどれば何の支払いか分かる。
+          '',
         ),
       },
     ]

@@ -321,6 +321,127 @@ describe('月次収支', () => {
   })
 })
 
+describe('入出金の明細', () => {
+  type TransactionBody = { id: string; amount: number; kind: string; note: string }
+
+  async function createEntry(
+    accountId: string,
+    amount: number,
+    note = '',
+  ): Promise<TransactionBody> {
+    const { status, body } = await req<TransactionBody>(
+      '/api/transactions',
+      jsonRequest('POST', { accountId, amount, occurredOn: '2026-07-12', note }),
+    )
+    expect(status).toBe(201)
+    return body
+  }
+
+  async function balanceOf(id: string): Promise<number> {
+    const { body } = await req<AccountBody[]>('/api/accounts')
+    return body.filter((a) => a.id === id)[0].balance
+  }
+
+  it('出金を打つと残高が減り、履歴が残る', async () => {
+    const account = await createAccount(500_000)
+
+    const entry = await createEntry(account.id, -3_000, 'コンビニ')
+
+    expect(entry.kind).toBe('adjustment')
+    expect(entry.note).toBe('コンビニ')
+    expect(await balanceOf(account.id)).toBe(497_000)
+    expect((await req<unknown[]>('/api/transactions')).body).toHaveLength(1)
+  })
+
+  it('入金を打つと残高が増える', async () => {
+    const account = await createAccount(500_000)
+
+    await createEntry(account.id, 250_000, '給料')
+
+    expect(await balanceOf(account.id)).toBe(750_000)
+  })
+
+  it('消すと残高が戻り、履歴からも消える', async () => {
+    const account = await createAccount(500_000)
+    const entry = await createEntry(account.id, -3_000, 'コンビニ')
+
+    const res = await req(`/api/transactions/${entry.id}`, authed({ method: 'DELETE' }))
+
+    expect(res.status).toBe(204)
+    expect(await balanceOf(account.id)).toBe(500_000)
+    expect((await req<unknown[]>('/api/transactions')).body).toHaveLength(0)
+  })
+
+  // 履歴だけ消すと、ウィッシュが完了のままなのに支払いが無かったことになる。
+  it('ウィッシュの支払いは消せず、残高も動かない', async () => {
+    const account = await createAccount(500_000)
+    const wish = await req<WishBody>(
+      '/api/wishes',
+      jsonRequest('POST', { title: 'テスト', amount: 80_000, category: 'item' }),
+    )
+    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
+    await req(
+      `/api/wishes/${wish.body.id}/pay`,
+      jsonRequest('POST', { accountId: account.id, occurredOn: '2026-07-12' }),
+    )
+    const paid = (await req<TransactionBody[]>('/api/transactions')).body[0]
+
+    const res = await req<{ error: { code: string } }>(
+      `/api/transactions/${paid.id}`,
+      authed({ method: 'DELETE' }),
+    )
+
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('TRANSACTION_NOT_DELETABLE')
+    expect(await balanceOf(account.id)).toBe(420_000)
+  })
+
+  // 残高が動かない記録に意味は無い。domain の判定なので 422。
+  it('金額0は 422', async () => {
+    const account = await createAccount(500_000)
+
+    const res = await req<{ error: { code: string } }>(
+      '/api/transactions',
+      jsonRequest('POST', { accountId: account.id, amount: 0, occurredOn: '2026-07-12' }),
+    )
+
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('INVALID_AMOUNT')
+    expect(await balanceOf(account.id)).toBe(500_000)
+  })
+
+  it('存在しない口座は 404', async () => {
+    const res = await req(
+      '/api/transactions',
+      jsonRequest('POST', {
+        accountId: '00000000-0000-4000-8000-00000000dead',
+        amount: -3_000,
+        occurredOn: '2026-07-12',
+      }),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('無い履歴の削除は 404', async () => {
+    const res = await req(
+      '/api/transactions/00000000-0000-4000-8000-00000000dead',
+      authed({ method: 'DELETE' }),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  // 明細は実質資産に効く。残高を動かすので、cashTotal 経由で netAsset に乗る。
+  it('明細で動いた残高が実質資産に反映される', async () => {
+    const account = await createAccount(500_000)
+
+    await createEntry(account.id, -3_000, 'コンビニ')
+
+    const { body } = await req<DashboardBody>('/api/dashboard')
+    expect(body.breakdown.cashTotal).toBe(497_000)
+    expect(body.netAsset).toBe(497_000)
+  })
+})
+
 describe('口座の削除', () => {
   // 履歴を作るのはウィッシュの支払い。貸し借りはもう口座を触らない（不変条件4）。
   it('取引履歴が残っていれば 422', async () => {

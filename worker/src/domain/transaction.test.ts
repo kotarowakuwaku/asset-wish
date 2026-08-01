@@ -25,7 +25,7 @@ describe('Transaction.create', () => {
   ]
 
   it.each(cases)('$name', (c) => {
-    const build = () => Transaction.create(id(), id(), yen(c.amount), c.kind, c.refId, SOME_DATE)
+    const build = () => Transaction.create(id(), id(), yen(c.amount), c.kind, c.refId, SOME_DATE, '')
     if (c.wantErr !== null) {
       expectDomainError(build, c.wantErr)
       return
@@ -39,15 +39,44 @@ describe('Transaction.create', () => {
   // 参照先を持てる種別と持てない種別が混ざると、履歴を辿るときに
   // 「ref_id があるのに参照先が無い」行を疑う羽目になる。入口で落とす。
   it('adjustment は参照先を渡されても保持しない', () => {
-    const t = Transaction.create(id(), id(), yen(-300), 'adjustment', id(), SOME_DATE)
+    const t = Transaction.create(id(), id(), yen(-300), 'adjustment', id(), SOME_DATE, '')
     expect(t.refId).toBeNull()
   })
 
   it('参照先はそのまま保持される', () => {
     const ref = id()
-    const t = Transaction.create(id(), id(), yen(-12_000), 'lending_created', ref, SOME_DATE)
+    const t = Transaction.create(id(), id(), yen(-12_000), 'lending_created', ref, SOME_DATE, '')
     expect(t.refId).toBe(ref)
   })
+
+  it('adjustment はメモを保持する', () => {
+    const t = Transaction.create(id(), id(), yen(-3_000), 'adjustment', null, SOME_DATE, 'コンビニ')
+    expect(t.note).toBe('コンビニ')
+  })
+
+  // メモが残っていると、参照先をたどるべき行なのか手入力の明細なのかが
+  // 一覧から判別できなくなる。参照先の扱いと揃えて落とす。
+  it('参照先を持つ種別はメモを渡されても保持しない', () => {
+    const t = Transaction.create(id(), id(), yen(-80_000), 'wish_paid', id(), SOME_DATE, 'メモ')
+    expect(t.note).toBe('')
+  })
+})
+
+describe('Transaction.ensureDeletable', () => {
+  it('手入力の明細は消せる', () => {
+    const t = Transaction.create(id(), id(), yen(-3_000), 'adjustment', null, SOME_DATE, 'コンビニ')
+    expect(() => t.ensureDeletable()).not.toThrow()
+  })
+
+  // 履歴だけ消して残高を戻すと、ウィッシュが完了のままなのに支払いが無かった
+  // ことになる。対になっている記録は、対のほうから操作させる。
+  it.each(['lending_created', 'lending_collected', 'wish_paid'] as const)(
+    '%s は消せない',
+    (kind) => {
+      const t = Transaction.create(id(), id(), yen(-100), kind, id(), SOME_DATE, '')
+      expectDomainError(() => t.ensureDeletable(), 'TRANSACTION_NOT_DELETABLE')
+    },
+  )
 })
 
 describe('TransactionKind', () => {

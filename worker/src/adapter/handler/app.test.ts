@@ -464,6 +464,76 @@ describe('取引履歴', () => {
     const { status } = await call('/api/transactions?limit=-1')
     expect(status).toBe(400)
   })
+
+  it('POST は 201 を返し、符号付きの金額をそのまま渡す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request(
+      '/api/transactions',
+      jsonRequest('POST', {
+        accountId: TEST_ID,
+        amount: -3_000,
+        occurredOn: '2026-07-12',
+        note: 'コンビニ',
+      }),
+    )
+    expect(res.status).toBe(201)
+    expect(deps.calls['transactions.create']).toEqual([TEST_ID, -3_000, '2026-07-12', 'コンビニ'])
+  })
+
+  it('入金は正の金額で届く', async () => {
+    const { app, deps } = makeApp()
+    await app.request(
+      '/api/transactions',
+      jsonRequest('POST', { accountId: TEST_ID, amount: 250_000, occurredOn: '2026-07-12' }),
+    )
+    expect(deps.calls['transactions.create']).toEqual([TEST_ID, 250_000, '2026-07-12', ''])
+  })
+
+  it('レスポンスにメモが載る', async () => {
+    const { body } = await call(
+      '/api/transactions',
+      jsonRequest('POST', { accountId: TEST_ID, amount: -3_000, occurredOn: '2026-07-12' }),
+    )
+    expect(body).toMatchObject({ kind: 'adjustment', note: 'コンビニ', refId: null })
+  })
+
+  // ここで作れるのは手入力の明細だけ。ウィッシュや貸し借りの履歴は
+  // それぞれの経路が作る。黙って無視すると「種別を指定したのに違う」になる。
+  it('POST で kind や refId を送ると 400', async () => {
+    for (const extra of [{ kind: 'wish_paid' }, { refId: OTHER_ID }]) {
+      const { status } = await call(
+        '/api/transactions',
+        jsonRequest('POST', {
+          accountId: TEST_ID,
+          amount: -3_000,
+          occurredOn: '2026-07-12',
+          ...extra,
+        }),
+      )
+      expect(status).toBe(400)
+    }
+  })
+
+  it('日付の形式が不正なら 400', async () => {
+    const { status, body } = await call(
+      '/api/transactions',
+      jsonRequest('POST', { accountId: TEST_ID, amount: -3_000, occurredOn: '2026/07/12' }),
+    )
+    expect(status).toBe(400)
+    expect((body as { error: { code: string } }).error.code).toBe('INVALID_DATE')
+  })
+
+  it('DELETE は 204 を返す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request(`/api/transactions/${TEST_ID}`, authed({ method: 'DELETE' }))
+    expect(res.status).toBe(204)
+    expect(deps.calls['transactions.delete']).toEqual([TEST_ID])
+  })
+
+  it('DELETE の id が UUID でなければ 400', async () => {
+    const { status } = await call('/api/transactions/abc', authed({ method: 'DELETE' }))
+    expect(status).toBe(400)
+  })
 })
 
 // 形式の誤り（400）は組み立て直す話、業務ルール違反（422）は値や状態を

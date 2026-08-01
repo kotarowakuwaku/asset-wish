@@ -43,6 +43,12 @@ export class Transaction {
    */
   readonly refId: string | null
   readonly occurredOn: IsoDate
+  /**
+   * 何に使ったかの覚書。分類（カテゴリ）は持たない。
+   *
+   * 参照先を持つ種別では空になる。何の取引かは refId をたどれば分かるため。
+   */
+  readonly note: string
 
   private constructor(
     id: string,
@@ -51,6 +57,7 @@ export class Transaction {
     kind: TransactionKind,
     refId: string | null,
     occurredOn: IsoDate,
+    note: string,
   ) {
     this.id = id
     this.accountId = accountId
@@ -58,6 +65,7 @@ export class Transaction {
     this.kind = kind
     this.refId = refId
     this.occurredOn = occurredOn
+    this.note = note
   }
 
   /**
@@ -75,12 +83,23 @@ export class Transaction {
     kind: TransactionKind,
     refId: string | null,
     occurredOn: IsoDate,
+    note: string,
   ): Transaction {
     if (isZeroMoney(amount)) throw domainError('INVALID_AMOUNT')
     if (!isTransactionKind(kind)) throw domainError('INVALID_TRANSACTION_KIND')
     if (requiresReference(kind) && refId === null) throw domainError('MISSING_REFERENCE')
-    // adjustment に参照先を持たせない。渡されても落とす。
-    return new Transaction(id, accountId, amount, kind, requiresReference(kind) ? refId : null, occurredOn)
+    return new Transaction(
+      id,
+      accountId,
+      amount,
+      kind,
+      // adjustment に参照先を持たせない。渡されても落とす。
+      requiresReference(kind) ? refId : null,
+      occurredOn,
+      // 参照先を持つ種別にメモを持たせない。落とす理由は参照先と同じで、
+      // 「メモがあるのに手入力ではない」行を後から疑わずに済むようにするため。
+      requiresReference(kind) ? '' : note,
+    )
   }
 
   /** DB から復元する。kind は CHECK 制約をすり抜けた値を通さないため検証する。 */
@@ -91,8 +110,23 @@ export class Transaction {
     kind: string,
     refId: string | null,
     occurredOn: IsoDate,
+    note: string,
   ): Transaction {
     if (!isTransactionKind(kind)) throw domainError('INVALID_TRANSACTION_KIND')
-    return new Transaction(id, accountId, amount, kind, refId, occurredOn)
+    return new Transaction(id, accountId, amount, kind, refId, occurredOn, note)
+  }
+
+  /**
+   * 削除して良いかを判定する（不変条件6）。
+   *
+   * 消せるのは手入力の明細だけ。参照先を持つ履歴は、ウィッシュの完了や
+   * 貸し借りの発生と対になっている。履歴だけ消すと、残高を戻した結果が
+   * ウィッシュの状態と食い違う。
+   *
+   * usecase に `if (kind === 'adjustment')` を書かせないため、判定と
+   * エラーの選択をここに閉じる。
+   */
+  ensureDeletable(): void {
+    if (requiresReference(this.kind)) throw domainError('TRANSACTION_NOT_DELETABLE')
   }
 }

@@ -66,6 +66,7 @@ export type TransactionKind =
   | 'lending_created'
   | 'lending_collected'
   | 'wish_paid'
+  /** 手入力の入出金の明細。新しく作れるのはこれだけで、消せるのもこれだけ。 */
   | 'adjustment'
 
 export type Transaction = {
@@ -76,6 +77,11 @@ export type Transaction = {
   kind: TransactionKind
   refId: string | null
   occurredOn: string
+  /**
+   * 何に使ったかの覚書。分類（カテゴリ）は持たない。
+   * 手入力の明細以外では空文字になる。
+   */
+  note: string
 }
 
 export type DashboardWish = Wish & {

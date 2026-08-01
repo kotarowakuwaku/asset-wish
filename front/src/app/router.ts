@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 // 画面の切り替えは hash で行う。ルーティングのライブラリは入れない。
 //
-// 画面は5つ、入れ子も動的な経路も無い。この規模なら、履歴 API を
+// 画面は6つ、入れ子も動的な経路も無い。この規模なら、履歴 API を
 // 直に触る数十行のほうが把握しやすい（CLAUDE.md「便利なライブラリで
 // 済ませる前に、まず素直な実装を検討する」）。
 //
@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 export const routes = [
   { path: 'dashboard', label: 'ダッシュボード' },
   { path: 'accounts', label: '口座' },
+  { path: 'transactions', label: '入出金' },
   { path: 'loans', label: '貸し借り' },
   { path: 'wishes', label: 'ウィッシュ' },
   { path: 'monthly-balances', label: '月次収支' },
