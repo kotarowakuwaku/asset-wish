@@ -91,6 +91,26 @@ report "存在しない文書を参照している" "-" \
     --include=*.ts --include=*.tsx --include=*.sql --include=*.md \
     --exclude-dir=node_modules .
 
+# --- CI の検証の網 ----------------------------------------------------------
+
+# ブランチ保護が必須にするのは ci ジョブだけ。**ジョブを足して ci の needs に
+# 入れ忘れると、そのジョブは落ちてもマージできる。** 実際に一度やった。
+# 落ちているのに気付けない検証は、無いより悪い。
+ci_needs_missing() {
+  local yml=.github/workflows/ci.yml
+  # jobs: 以降だけを見る。on: や permissions: の下にも同じ深さのキーがあり、
+  # ファイル全体から拾うと偽陽性まみれになる。
+  local jobs needs
+  jobs=$(awk '/^jobs:/{f=1;next} f && /^[a-z]/{f=0} f' "$yml" |
+         grep -oE '^  [a-z][a-z0-9_-]*:' | tr -d ' :')
+  needs=$(grep -oE '^    needs: \[[^]]*\]' "$yml" | tr -d ' ' | sed 's/needs:\[//;s/\]//' | tr ',' '\n')
+  for j in $jobs; do
+    [ "$j" = "ci" ] && continue
+    echo "$needs" | grep -qx "$j" || echo "${yml}: ci ジョブの needs に ${j} が無い"
+  done
+}
+report "CI のジョブが ci の needs に入っていない。落ちてもマージできる" "-" ci_needs_missing
+
 # --- テストの無効化 ---------------------------------------------------------
 
 # 緑にするためにテストを飛ばしていないこと。
