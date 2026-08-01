@@ -47,7 +47,8 @@ export function buildDeps(env: Env): Deps {
     loans: new LoanUsecase(writer, loanRepo, newID),
     wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
     balances: new MonthlyBalanceUsecase(balanceRepo, newID),
-    transactions: new TransactionUsecase(transactionRepo),
+    // 明細の登録・削除は口座残高を動かすため、writer と accountRepo が要る。
+    transactions: new TransactionUsecase(writer, transactionRepo, accountRepo, now, newID),
     dashboard: new DashboardUsecase(accountRepo, loanRepo, wishRepo, balanceRepo, now),
     now,
     authToken,

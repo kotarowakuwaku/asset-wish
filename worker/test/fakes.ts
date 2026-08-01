@@ -179,8 +179,18 @@ export class FakeMonthlyBalanceRepository implements MonthlyBalanceRepository {
 export class FakeTransactionRepository implements TransactionRepository {
   readonly items: Transaction[] = []
 
+  seed(...transactions: Transaction[]): void {
+    this.items.push(...transactions)
+  }
+
   async list(limit: number): Promise<Transaction[]> {
     return this.items.slice(0, limit)
+  }
+
+  async get(id: string): Promise<Transaction> {
+    const found = this.items.find((t) => t.id === id)
+    if (found === undefined) throw new NotFoundError('取引履歴')
+    return found
   }
 }
 
@@ -229,6 +239,7 @@ export class FakeAtomicWriter implements AtomicWriter {
         return this.#wishes.items.get(op.wish.id)?.status === op.expectedStatus
       case 'createLoan':
       case 'createTransaction':
+      case 'deleteTransaction':
         return true
     }
   }
@@ -250,6 +261,11 @@ export class FakeAtomicWriter implements AtomicWriter {
       case 'createTransaction':
         this.#transactions.items.push(op.transaction)
         return
+      case 'deleteTransaction': {
+        const at = this.#transactions.items.findIndex((t) => t.id === op.transaction.id)
+        if (at !== -1) this.#transactions.items.splice(at, 1)
+        return
+      }
     }
   }
 }

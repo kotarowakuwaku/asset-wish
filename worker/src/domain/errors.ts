@@ -21,6 +21,7 @@ export const DOMAIN_ERROR_MESSAGES = {
   INVALID_YEAR_MONTH: '年月の指定が不正です',
   INVALID_TRANSACTION_KIND: '取引種別が不正です',
   MISSING_REFERENCE: 'この取引種別には参照先が必要です',
+  TRANSACTION_NOT_DELETABLE: 'ウィッシュや貸し借りに紐づく履歴は削除できません',
   ACCOUNT_IN_USE: '取引履歴が残っている口座は削除できません',
 } as const
 

@@ -117,7 +117,9 @@ const transactionKindLabels: Record<string, string> = {
   lending_created: '貸し借りの発生',
   lending_collected: '貸し借りの精算',
   wish_paid: 'ウィッシュの支払い',
-  adjustment: '残高の調整',
+  // 手入力の明細。以前は「残高の調整」と呼んでいたが、作る経路が無く
+  // 1件も存在しなかった。入出金を打てるようにしたのに伴い意味を与えた。
+  adjustment: '入出金',
 }
 
 export function transactionKindLabel(kind: string): string {

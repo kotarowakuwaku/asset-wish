@@ -182,6 +182,17 @@ export function createClient(token: string) {
     ) => put<MonthlyBalance>(`/api/monthly-balances/${yearMonth}`, input),
 
     listTransactions: () => get<Transaction[]>('/api/transactions'),
+    // 金額は符号付き。出金は負、入金は正。kind は送れない（送ると 400）。
+    // ここで作れるのは手入力の明細だけで、ウィッシュや貸し借りの履歴は
+    // それぞれの経路が作る。
+    createTransaction: (input: {
+      accountId: string
+      amount: number
+      occurredOn: string
+      note: string
+    }) => post<Transaction>('/api/transactions', input),
+    // 消せるのは手入力の明細だけ。それ以外はサーバーが 422 を返す。
+    deleteTransaction: (id: string) => del(`/api/transactions/${id}`),
   }
 }
 

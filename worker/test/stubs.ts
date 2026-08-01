@@ -60,7 +60,28 @@ export function aMonthlyBalance(): MonthlyBalance {
 }
 
 export function aTransaction(): Transaction {
-  return Transaction.create(TEST_ID, OTHER_ID, yen(-12_000), 'lending_created', OTHER_ID, SOME_DATE)
+  return Transaction.create(
+    TEST_ID,
+    OTHER_ID,
+    yen(-12_000),
+    'lending_created',
+    OTHER_ID,
+    SOME_DATE,
+    '',
+  )
+}
+
+/** 手入力の明細。削除できる唯一の種別。 */
+export function anEntry(overrides: { amount?: number; note?: string } = {}): Transaction {
+  return Transaction.create(
+    TEST_ID,
+    OTHER_ID,
+    yen(overrides.amount ?? -3_000),
+    'adjustment',
+    null,
+    SOME_DATE,
+    overrides.note ?? 'コンビニ',
+  )
 }
 
 export function aDashboard(): Dashboard {
@@ -122,6 +143,8 @@ export function stubDeps(overrides: Partial<Deps> = {}): Deps & { calls: Calls }
     },
     transactions: {
       list: record('transactions.list', () => [aTransaction()]),
+      create: record('transactions.create', () => anEntry()),
+      delete: record('transactions.delete', () => undefined),
     },
     dashboard: {
       get: record('dashboard.get', () => aDashboard()),

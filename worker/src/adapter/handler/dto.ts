@@ -73,6 +73,8 @@ export function transactionResponse(t: Transaction) {
     kind: t.kind,
     refId: t.refId,
     occurredOn: t.occurredOn,
+    // 手入力の明細以外では空。何の取引かは refId をたどれば分かる。
+    note: t.note,
   }
 }
 

@@ -1,7 +1,7 @@
 import { ConflictError, type AtomicWriter, type WriteOperation } from '../../usecase/port'
 import { updateAccountStatement } from './account'
 import { insertLoanStatement, updateLoanSettledStatement } from './loan'
-import { insertTransactionStatement } from './transaction'
+import { deleteTransactionStatement, insertTransactionStatement } from './transaction'
 import { updateWishStatusStatement } from './wish'
 
 /**
@@ -66,6 +66,8 @@ export class D1AtomicWriter implements AtomicWriter {
         return updateAccountStatement(this.#db, op.account, guarded)
       case 'createTransaction':
         return insertTransactionStatement(this.#db, op.transaction, guarded)
+      case 'deleteTransaction':
+        return deleteTransactionStatement(this.#db, op.transaction, guarded)
     }
   }
 }
@@ -98,8 +100,12 @@ function preconditionOf(op: WriteOperation): Precondition[] {
       ]
     case 'updateWishStatus':
       return [{ table: 'wishes', column: 'status', id: op.wish.id, value: op.expectedStatus }]
+    // 履歴の作成・削除は前提条件を持たない。どちらも口座残高の増減と同じ
+    // batch に載り、その残高が番人になる。履歴側にも条件を足すと、番人が
+    // 2箇所に分かれて「どちらが先に見たか」を考える羽目になる。
     case 'createLoan':
     case 'createTransaction':
+    case 'deleteTransaction':
       return []
   }
 }
