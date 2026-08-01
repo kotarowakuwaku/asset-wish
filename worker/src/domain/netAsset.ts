@@ -1,13 +1,20 @@
 import type { Account } from './account'
 import type { Loan } from './loan'
+import { pendingApplications, pendingTotal, type RecurringEntry } from './recurring'
+import type { IsoDate } from './time'
 import { addMoney, subMoney, ZERO_MONEY, type Money } from './money'
 import type { Wish } from './wish'
 
-// 実質資産と、**実質資産の外に置く参考値**（投資・貸借）を出す。
+// **口座の残高を3つの時点で出す。** どれも「現金・預金がいくらか」を
+// 別の時点で見たもので、一緒に読めるべきなので同居させている。
 //
-// 参考値をここに同居させているのは、「実質資産に足すか足さないか」が
-// 対で読めるようにするため。**足さないものを足さないと決めているのも
-// 実質資産の定義の一部**（不変条件1・4）。
+//   今ある額            cashTotal        いま口座にいくらあるか
+//   支払い後に残る額     netAsset         確定した支出を払ったら残る額
+//   来月初めの見込み     projectedBalance 定期入出金を反映した翌月1日の額
+//
+// あわせて、**この3つのどれにも足さない参考値**（投資・貸借）も置く。
+// 足さないと決めていること自体が定義の一部だから、対で読めるほうがよい
+// （不変条件1・4）。
 //
 // ウィッシュの到達（不足額・何ヶ月）は wishProgress.ts、月次の平均は
 // monthlySummary.ts。名前と中身をずらさない。
@@ -29,7 +36,7 @@ export type NetAssetBreakdown = {
 }
 
 /**
- * 実質資産。cashTotal - commitments。
+ * 支払い後に残る額（実質資産）。cashTotal - commitments。
  *
  * commitments を正で保持して減算するのは、表示時に「確定支出: 80,000円」と
  * 出したいため。符号反転を1箇所に閉じ込める。
@@ -107,4 +114,26 @@ export function calculateOutstandingLoans(loans: readonly Loan[]): OutstandingLo
   }
 
   return { lent, borrowed }
+}
+
+/**
+ * 来月初めの見込み残高。
+ *
+ * **今ある額に、翌月1日までに適用日が来る定期入出金を足し引きしただけ。**
+ * 給料や家賃が反映されていないと「今いくらあるか」だけでは月末に向けて
+ * どうなるのかが読めない、というのがこの値の存在理由。
+ *
+ * **確定した支出（ウィッシュ）は含めない。** いつ払うかが決まっていない
+ * ため、含めると「まだ払っていないのに減っている」が別の形で再発する。
+ * 払ったら残る額は netAsset が別に出している。
+ *
+ * まだ適用していない過去の分も入る。適用日が来ているのに適用していない
+ * だけで、**起きているはずのこと**だから。
+ */
+export function projectedBalance(
+  cashTotal: Money,
+  entries: readonly RecurringEntry[],
+  asOf: IsoDate,
+): Money {
+  return addMoney(cashTotal, pendingTotal(pendingApplications(entries, asOf)))
 }
