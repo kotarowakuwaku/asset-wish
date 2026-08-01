@@ -19,7 +19,7 @@ import { loadConfig } from './infra/config'
 import { AccountUsecase } from './usecase/account'
 import { DashboardUsecase } from './usecase/dashboard'
 import { LoanUsecase } from './usecase/loan'
-import { MonthlyBalanceUsecase } from './usecase/monthlyBalance'
+import { MonthlySummaryUsecase } from './usecase/monthlySummary'
 import { newUUID, systemClock } from './usecase/port'
 import { TransactionUsecase } from './usecase/transaction'
 import { WishUsecase } from './usecase/wish'
@@ -46,10 +46,18 @@ export function buildDeps(env: Env): Deps {
     // 貸し借りは口座を触らない（不変条件4）。accountRepo も Clock も要らない。
     loans: new LoanUsecase(writer, loanRepo, newID),
     wishes: new WishUsecase(writer, wishRepo, accountRepo, now, newID),
-    balances: new MonthlyBalanceUsecase(balanceRepo, newID),
+    // 月次の収支は明細から集計する。手入力の経路はもう無い。
+    summaries: new MonthlySummaryUsecase(transactionRepo, balanceRepo),
     // 明細の登録・削除は口座残高を動かすため、writer と accountRepo が要る。
     transactions: new TransactionUsecase(writer, transactionRepo, accountRepo, now, newID),
-    dashboard: new DashboardUsecase(accountRepo, loanRepo, wishRepo, balanceRepo, now),
+    dashboard: new DashboardUsecase(
+      accountRepo,
+      loanRepo,
+      wishRepo,
+      transactionRepo,
+      balanceRepo,
+      now,
+    ),
     now,
     authToken,
   }

@@ -12,6 +12,7 @@ import {
   type NetAssetBreakdown,
   type OutstandingLoans,
 } from '../domain/netAsset'
+import { summarizeMonths } from '../domain/monthlySummary'
 import { yearMonthOf } from '../domain/time'
 import { isTerminalWishStatus, type Wish } from '../domain/wish'
 import { YearMonth } from '../domain/yearMonth'
@@ -20,6 +21,7 @@ import type {
   Clock,
   LoanRepository,
   MonthlyBalanceRepository,
+  TransactionRepository,
   WishRepository,
 } from './port'
 
@@ -53,6 +55,9 @@ export class DashboardUsecase {
   readonly #accounts: AccountRepository
   readonly #loans: LoanRepository
   readonly #wishes: WishRepository
+  // 月次の収支は明細から集計する。手入力の月次収支は、明細が1件も無い月を
+  // 埋めるためだけに読む（docs/spec-changes.md 4）。
+  readonly #transactions: TransactionRepository
   readonly #balances: MonthlyBalanceRepository
   // 「期限まであと何ヶ月あるか」を出すのに現在の年月が要る。実時刻を直に
   // 読むとテストが月をまたいだ瞬間に落ちる。
@@ -62,12 +67,14 @@ export class DashboardUsecase {
     accounts: AccountRepository,
     loans: LoanRepository,
     wishes: WishRepository,
+    transactions: TransactionRepository,
     balances: MonthlyBalanceRepository,
     now: Clock,
   ) {
     this.#accounts = accounts
     this.#loans = loans
     this.#wishes = wishes
+    this.#transactions = transactions
     this.#balances = balances
     this.#now = now
   }
@@ -78,18 +85,24 @@ export class DashboardUsecase {
    * 計算は必ず domain の関数を呼ぶ。ここで式を再実装しない（不変条件8）。
    */
   async get(): Promise<Dashboard> {
-    const [accounts, loans, wishes, balances] = await Promise.all([
+    const [accounts, loans, wishes, transactions, balances] = await Promise.all([
       this.#accounts.list(),
       // 未精算のみ。精算済みの貸し借りは返ってくる予定の額に含めない。
       this.#loans.list(true),
       this.#wishes.list(null),
-      this.#balances.listRecent(AVERAGE_SURPLUS_MONTHS),
+      this.#transactions.listAll(),
+      this.#balances.listAll(),
     ])
 
     const currentMonth = YearMonth.parse(yearMonthOf(this.#now()))
     const breakdown = calculateBreakdown(accounts, wishes)
     const total = netAsset(breakdown)
-    const avgSurplus = averageSurplus(balances, AVERAGE_SURPLUS_MONTHS)
+    // 月次の収支は明細から集計する。当月は終わっていないので平均に含めない。
+    const avgSurplus = averageSurplus(
+      summarizeMonths(transactions, balances),
+      AVERAGE_SURPLUS_MONTHS,
+      currentMonth,
+    )
 
     const dashboardWishes: DashboardWish[] = []
     for (const wish of wishes) {

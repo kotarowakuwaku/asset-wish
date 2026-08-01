@@ -8,7 +8,7 @@ import type { Deps } from '../src/adapter/handler/services'
 import { Account } from '../src/domain/account'
 import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money } from '../src/domain/money'
-import { MonthlyBalance } from '../src/domain/monthlyBalance'
+import { MonthlySummary, type MonthlySource } from '../src/domain/monthlySummary'
 import { Transaction } from '../src/domain/transaction'
 import { Wish } from '../src/domain/wish'
 import { YearMonth } from '../src/domain/yearMonth'
@@ -55,8 +55,8 @@ export function aWish(overrides: { status?: string; deadline?: string | null } =
   })
 }
 
-export function aMonthlyBalance(): MonthlyBalance {
-  return MonthlyBalance.create(TEST_ID, YearMonth.of(2026, 7), yen(300_000), yen(230_000))
+export function aMonthlySummary(source: MonthlySource = 'entries'): MonthlySummary {
+  return MonthlySummary.of(YearMonth.of(2026, 7), yen(300_000), yen(230_000), source)
 }
 
 export function aTransaction(): Transaction {
@@ -137,9 +137,8 @@ export function stubDeps(overrides: Partial<Deps> = {}): Deps & { calls: Calls }
       drop: record('wishes.drop', () => aWish({ status: 'dropped' })),
       delete: record('wishes.delete', () => undefined),
     },
-    balances: {
-      list: record('balances.list', () => [aMonthlyBalance()]),
-      upsert: record('balances.upsert', () => aMonthlyBalance()),
+    summaries: {
+      list: record('summaries.list', () => [aMonthlySummary()]),
     },
     transactions: {
       list: record('transactions.list', () => [aTransaction()]),

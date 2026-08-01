@@ -132,22 +132,25 @@ describe('calculateOutstandingLoans', () => {
 })
 
 describe('averageSurplus', () => {
+  // 検証したい月（2026-04〜07）がすべて「完了した月」になるように当月を置く。
+  const CURRENT = YearMonth.of(2026, 8)
+
   it('B-1: 3ヶ月を平均する', () => {
     const bals = [
       mb(2026, 5, 300_000, 240_000), // +60k
       mb(2026, 6, 300_000, 250_000), // +50k
       mb(2026, 7, 300_000, 230_000), // +70k
     ]
-    expect(averageSurplus(bals, 3)).toBe(60_000)
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_000)
   })
 
   it('B-2: 2件しか無ければ2件で平均する', () => {
     const bals = [mb(2026, 6, 300_000, 250_000), mb(2026, 7, 300_000, 230_000)]
-    expect(averageSurplus(bals, 3)).toBe(60_000)
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_000)
   })
 
   it('B-3: 空なら null（算出不可。0 ではない）', () => {
-    expect(averageSurplus([], 3)).toBeNull()
+    expect(averageSurplus([], 3, CURRENT)).toBeNull()
   })
 
   it('B-4: 4件あっても直近3件だけを見る', () => {
@@ -157,7 +160,7 @@ describe('averageSurplus', () => {
       mb(2026, 6, 300_000, 250_000), // +50k
       mb(2026, 7, 300_000, 230_000), // +70k
     ]
-    expect(averageSurplus(bals, 3)).toBe(60_000)
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_000)
   })
 
   it('B-5: 順不同で渡しても内部で整列する', () => {
@@ -166,11 +169,11 @@ describe('averageSurplus', () => {
       mb(2026, 5, 300_000, 240_000),
       mb(2026, 6, 300_000, 250_000),
     ]
-    expect(averageSurplus(bals, 3)).toBe(60_000)
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_000)
   })
 
   it('B-6: 赤字1ヶ月なら負値を返す', () => {
-    expect(averageSurplus([mb(2026, 7, 200_000, 250_000)], 3)).toBe(-50_000)
+    expect(averageSurplus([mb(2026, 7, 200_000, 250_000)], 3, CURRENT)).toBe(-50_000)
   })
 
   it('B-7: 割り切れないときは0方向に切り捨てる', () => {
@@ -180,7 +183,7 @@ describe('averageSurplus', () => {
       mb(2026, 7, 300_000, 230_000), // +70k
     ]
     // 合計 181000 / 3 = 60333.33... → 60333
-    expect(averageSurplus(bals, 3)).toBe(60_333)
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_333)
   })
 
   it('B-8: 引数の配列を変更しない', () => {
@@ -190,8 +193,28 @@ describe('averageSurplus', () => {
       mb(2026, 6, 300_000, 250_000),
     ]
     const before = bals.map((b) => b.yearMonth.toString())
-    averageSurplus(bals, 3)
+    averageSurplus(bals, 3, CURRENT)
     expect(bals.map((b) => b.yearMonth.toString())).toEqual(before)
+  })
+
+  // まだ終わっていない月を混ぜると、余剰が実態より小さく見える。
+  // 月初なら家賃だけ引かれて給料がまだ、という状態になる。
+  it('B-9: 当月は平均に含めない', () => {
+    const bals = [
+      mb(2026, 6, 300_000, 250_000), // +50k
+      mb(2026, 7, 300_000, 230_000), // +70k
+      mb(2026, 8, 0, 80_000), // -80k（当月。まだ給料が入っていない）
+    ]
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(60_000)
+  })
+
+  it('B-10: 当月しか無ければ null（算出不可）', () => {
+    expect(averageSurplus([mb(2026, 8, 300_000, 230_000)], 3, CURRENT)).toBeNull()
+  })
+
+  it('B-11: 未来の月も含めない', () => {
+    const bals = [mb(2026, 7, 300_000, 230_000), mb(2026, 9, 300_000, 0)]
+    expect(averageSurplus(bals, 3, CURRENT)).toBe(70_000)
   })
 })
 

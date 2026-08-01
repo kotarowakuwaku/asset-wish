@@ -94,6 +94,23 @@ export async function givenWish(
   return w
 }
 
+/**
+ * 手入力の月次収支を1件入れる。
+ *
+ * **本番のコードにこの表へ書く経路はもう無い**（月次の収支は明細から集計する）。
+ * 明細を打ち始める前の月を再現するために、テストからだけ直に入れる。
+ */
+export async function givenMonthlyBalance(
+  yearMonth: string,
+  income: number,
+  expense: number,
+): Promise<void> {
+  await db
+    .prepare('INSERT INTO monthly_balances (id, year_month, income, expense) VALUES (?, ?, ?, ?)')
+    .bind(id(), yearMonth, income, expense)
+    .run()
+}
+
 /** 取引履歴を1件入れて返す。 */
 export async function givenTransaction(
   accountId: string,

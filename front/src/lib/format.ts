@@ -150,11 +150,6 @@ export function todayISO(now: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
-/** currentYearMonth は今月を YYYY-MM で返す。 */
-export function currentYearMonth(now: Date = new Date()): string {
-  return todayISO(now).slice(0, 7)
-}
-
 /**
  * parseAmount は入力欄の文字列を金額に変換する。
  *

@@ -96,7 +96,7 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
 
     await route.fulfill({ json: transactions })
   })
-  await page.route('**/api/monthly-balances*', (route) =>
+  await page.route('**/api/monthly-summaries*', (route) =>
     route.fulfill({ json: [] }),
   )
 

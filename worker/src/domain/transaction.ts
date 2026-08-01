@@ -117,6 +117,17 @@ export class Transaction {
   }
 
   /**
+   * 手で打った入出金の明細か。
+   *
+   * 参照先を持つ履歴（ウィッシュの支払い・過去の貸し借り）は、それぞれの
+   * 操作の副産物であって、自分で打った記録ではない。**消せるのも、月次の
+   * 集計に足すのも、これが true のものだけ。**
+   */
+  isManualEntry(): boolean {
+    return !requiresReference(this.kind)
+  }
+
+  /**
    * 削除して良いかを判定する（不変条件6）。
    *
    * 消せるのは手入力の明細だけ。参照先を持つ履歴は、ウィッシュの完了や
@@ -127,6 +138,6 @@ export class Transaction {
    * エラーの選択をここに閉じる。
    */
   ensureDeletable(): void {
-    if (requiresReference(this.kind)) throw domainError('TRANSACTION_NOT_DELETABLE')
+    if (!this.isManualEntry()) throw domainError('TRANSACTION_NOT_DELETABLE')
   }
 }

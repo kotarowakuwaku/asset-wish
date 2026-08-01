@@ -16,7 +16,7 @@ export const routes = [
   { path: 'transactions', label: '入出金' },
   { path: 'loans', label: '貸し借り' },
   { path: 'wishes', label: 'ウィッシュ' },
-  { path: 'monthly-balances', label: '月次収支' },
+  { path: 'monthly-summaries', label: '月次収支' },
 ] as const
 
 export type RoutePath = (typeof routes)[number]['path']

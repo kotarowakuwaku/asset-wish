@@ -6,6 +6,7 @@ const NOW = instantOf('2026-07-29T00:00:00Z')
 import { Account, type AccountKind } from '../domain/account'
 import { Loan, type LoanDirection } from '../domain/loan'
 import { MonthlyBalance } from '../domain/monthlyBalance'
+import { Transaction } from '../domain/transaction'
 import { Wish, type WishStatus } from '../domain/wish'
 import { YearMonth } from '../domain/yearMonth'
 import { DashboardUsecase } from './dashboard'
@@ -21,6 +22,7 @@ beforeEach(() => {
     fakes.accounts,
     fakes.loans,
     fakes.wishes,
+    fakes.transactions,
     fakes.balances,
     fixedClock(NOW),
   )
@@ -56,9 +58,22 @@ function seedWish(
   )
 }
 
+/**
+ * 明細を打ち始める前の月を用意する。
+ *
+ * 月次の収支は明細から集計するようになったが、明細が1件も無い月に限って
+ * この手入力の値が使われる（docs/spec-changes.md 4）。
+ */
 function seedBalance(year: number, month: number, income: number, expense: number): void {
   fakes.balances.seed(
     MonthlyBalance.create(nextId(), YearMonth.of(year, month), yen(income), yen(expense)),
+  )
+}
+
+/** 手入力の入出金の明細。金額は符号付きで、出金は負。 */
+function seedEntry(occurredOn: string, amount: number): void {
+  fakes.transactions.seed(
+    Transaction.create(nextId(), 'acc-1', yen(amount), 'adjustment', null, isoDateOf(occurredOn), ''),
   )
 }
 
@@ -150,7 +165,7 @@ describe('ウィッシュの一覧', () => {
   it('不足額と到達見込みを付ける', async () => {
     seedAccount('cash', 500_000)
     seedWish(800_000, 'considering')
-    seedBalance(2026, 7, 300_000, 200_000) // 余剰 +100,000
+    seedBalance(2026, 6, 300_000, 200_000) // 余剰 +100,000
 
     const [w] = (await usecase.get()).wishes
 
@@ -161,7 +176,7 @@ describe('ウィッシュの一覧', () => {
   it('すでに手が届くなら不足額は負値で、到達見込みは算出不可', async () => {
     seedAccount('cash', 500_000)
     seedWish(100_000, 'considering')
-    seedBalance(2026, 7, 300_000, 200_000)
+    seedBalance(2026, 6, 300_000, 200_000)
 
     const [w] = (await usecase.get()).wishes
 
@@ -219,11 +234,59 @@ describe('期限までに毎月いくら貯めればよいか', () => {
 })
 
 describe('平均月間余剰', () => {
-  it('直近3ヶ月で平均する', async () => {
-    seedBalance(2026, 4, 300_000, 300_000) // +0（除外されるはず）
-    seedBalance(2026, 5, 300_000, 240_000) // +60k
-    seedBalance(2026, 6, 300_000, 250_000) // +50k
-    seedBalance(2026, 7, 300_000, 230_000) // +70k
+  // 月次の収支は明細から出る。手入力の経路はもう無い。
+  it('明細を月ごとに足し上げて平均する', async () => {
+    seedEntry('2026-06-25', 300_000)
+    seedEntry('2026-06-05', -230_000) // +70k
+    seedEntry('2026-05-25', 300_000)
+    seedEntry('2026-05-05', -250_000) // +50k
+    seedEntry('2026-04-25', 300_000)
+    seedEntry('2026-04-05', -240_000) // +60k
+
+    expect((await usecase.get()).averageSurplus).toBe(60_000)
+  })
+
+  // ライブ代のような臨時支出を混ぜると、何か買うたびに他の目標の到達見込みが
+  // 悪化する（不変条件2の考え方）。
+  it('ウィッシュの支払いは平均に足さない', async () => {
+    seedEntry('2026-06-25', 300_000)
+    seedEntry('2026-06-05', -230_000) // +70k
+    fakes.transactions.seed(
+      Transaction.create(nextId(), 'acc-1', yen(-80_000), 'wish_paid', 'w-1', isoDateOf('2026-06-10'), ''),
+    )
+
+    expect((await usecase.get()).averageSurplus).toBe(70_000)
+  })
+
+  // まだ終わっていない月を混ぜると、余剰が実態より小さく見える。
+  it('当月は平均に含めない', async () => {
+    seedEntry('2026-06-25', 300_000)
+    seedEntry('2026-06-05', -230_000) // +70k
+    seedEntry('2026-07-05', -80_000) // 当月。まだ給料が入っていない
+
+    expect((await usecase.get()).averageSurplus).toBe(70_000)
+  })
+
+  it('当月の明細しか無ければ算出不可', async () => {
+    seedEntry('2026-07-25', 300_000)
+
+    expect((await usecase.get()).averageSurplus).toBeNull()
+  })
+
+  // 明細が1件でもある月は明細が正。両方足すと二重計上になる。
+  it('明細のある月は手入力の値を使わない', async () => {
+    seedBalance(2026, 6, 300_000, 100_000) // +200k（使われないはず）
+    seedEntry('2026-06-25', 300_000)
+    seedEntry('2026-06-05', -230_000) // +70k
+
+    expect((await usecase.get()).averageSurplus).toBe(70_000)
+  })
+
+  it('明細が無い月は手入力の値で平均する', async () => {
+    seedBalance(2026, 3, 300_000, 300_000) // +0（除外されるはず）
+    seedBalance(2026, 4, 300_000, 240_000) // +60k
+    seedBalance(2026, 5, 300_000, 250_000) // +50k
+    seedBalance(2026, 6, 300_000, 230_000) // +70k
 
     expect((await usecase.get()).averageSurplus).toBe(60_000)
   })
@@ -243,7 +306,7 @@ describe('平均月間余剰', () => {
   it('余剰が0以下なら到達見込みは算出不可', async () => {
     seedAccount('cash', 500_000)
     seedWish(800_000, 'considering')
-    seedBalance(2026, 7, 200_000, 250_000) // 赤字
+    seedBalance(2026, 6, 200_000, 250_000) // 赤字
 
     const d = await usecase.get()
 

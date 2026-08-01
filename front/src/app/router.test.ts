@@ -8,7 +8,7 @@ describe('parseHash', () => {
     ['#/transactions', 'transactions'],
     ['#/loans', 'loans'],
     ['#/wishes', 'wishes'],
-    ['#/monthly-balances', 'monthly-balances'],
+    ['#/monthly-summaries', 'monthly-summaries'],
     ['#accounts', 'accounts'],
   ])('parseHash(%s) = %s', (hash, want) => {
     expect(parseHash(hash)).toBe(want)
@@ -31,7 +31,7 @@ describe('routes', () => {
       'transactions',
       'loans',
       'wishes',
-      'monthly-balances',
+      'monthly-summaries',
     ])
   })
 

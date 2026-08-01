@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  currentYearMonth,
   formatDate,
   formatMoney,
   formatMonths,
@@ -76,16 +75,12 @@ describe('formatDate', () => {
   })
 })
 
-describe('todayISO / currentYearMonth', () => {
+describe('todayISO', () => {
   // 実時刻に依存させない。日付が変わった瞬間に落ちるテストを作らないため。
   const fixed = new Date(2026, 6, 5) // 2026-07-05（月は0始まり）
 
   it('日付を0埋めして返す', () => {
     expect(todayISO(fixed)).toBe('2026-07-05')
-  })
-
-  it('今月を YYYY-MM で返す', () => {
-    expect(currentYearMonth(fixed)).toBe('2026-07')
   })
 })
 

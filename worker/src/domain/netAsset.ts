@@ -1,7 +1,6 @@
 import type { Account } from './account'
 import type { Loan } from './loan'
 import { addMoney, isPositiveMoney, subMoney, ZERO_MONEY, type Money } from './money'
-import type { MonthlyBalance } from './monthlyBalance'
 import type { Wish } from './wish'
 import type { YearMonth } from './yearMonth'
 
@@ -114,19 +113,39 @@ export function calculateShortfall(wish: Wish, currentNetAsset: Money): Money {
 }
 
 /**
- * 直近 months ヶ月の月間余剰の平均を返す。件数が 0 なら null。
+ * 月間余剰を持つもの。月次の集計（MonthlySummary）と、手入力の月次収支
+ * （MonthlyBalance）の両方がこの形を満たす。
+ */
+export type MonthlyFigures = {
+  yearMonth: YearMonth
+  surplus(): Money
+}
+
+/**
+ * 直近 count ヶ月の月間余剰の平均を返す。対象が 0 件なら null。
  *
- * balances は年月の昇降順を問わない。内部でコピーして降順に整列するため、
- * 引数の配列は変更しない。件数が months 未満なら存在する分だけで平均する。
+ * **当月は含めない。** まだ終わっていない月を混ぜると、余剰が実態より
+ * 小さく見える。月初なら家賃だけ引かれて給料がまだ、という状態になり、
+ * 月の前半だけ到達見込みが悪化する。
+ *
+ * figures は年月の昇降順を問わない。内部でコピーして降順に整列するため、
+ * 引数の配列は変更しない。件数が count 未満なら存在する分だけで平均する。
  * 平均は0方向への切り捨て。
  *
  * null は「算出不可」であって 0 ではない。0 として扱うと「余剰なし」に見える。
  */
-export function averageSurplus(balances: readonly MonthlyBalance[], months: number): Money | null {
-  if (balances.length === 0 || months <= 0) return null
+export function averageSurplus(
+  figures: readonly MonthlyFigures[],
+  count: number,
+  current: YearMonth,
+): Money | null {
+  if (count <= 0) return null
 
-  const sorted = [...balances].sort((a, b) => b.yearMonth.compare(a.yearMonth)) // 降順
-  const n = Math.min(months, sorted.length)
+  const completed = figures.filter((f) => f.yearMonth.before(current))
+  if (completed.length === 0) return null
+
+  const sorted = [...completed].sort((a, b) => b.yearMonth.compare(a.yearMonth)) // 降順
+  const n = Math.min(count, sorted.length)
 
   let sum = ZERO_MONEY
   for (const m of sorted.slice(0, n)) {

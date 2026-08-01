@@ -52,14 +52,27 @@ export type Wish = {
   deadline: string | null
 }
 
-export type MonthlyBalance = {
-  id: string
+/**
+ * その月の収支がどこから来たか。
+ *
+ * 'entries' は明細の集計、'manual' は明細が1件も無い月を、廃止前に手入力した
+ * 値で埋めたもの。どちらを見ているか分からないと「明細を打ったのに反映
+ * されない」ように見える。
+ */
+export type MonthlySource = 'entries' | 'manual'
+
+/**
+ * 月ごとの収入・支出・余剰。**明細から導出した値で、保存された行ではない。**
+ * id を持たないのはそのため。手で登録する経路はもう無い。
+ */
+export type MonthlySummary = {
   /** YYYY-MM */
   yearMonth: string
   income: number
   expense: number
   /** 月間余剰。income - expense の導出値。負値なら赤字。 */
   surplus: number
+  source: MonthlySource
 }
 
 export type TransactionKind =

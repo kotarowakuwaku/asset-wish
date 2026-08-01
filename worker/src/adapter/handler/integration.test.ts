@@ -6,7 +6,7 @@
 
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { resetDb } from '../../../test/db'
+import { givenMonthlyBalance, resetDb } from '../../../test/db'
 import { authed, jsonRequest, TEST_TOKEN } from '../../../test/stubs'
 import { buildDeps } from '../../index'
 import { createApp } from './app'
@@ -48,6 +48,28 @@ async function createAccount(balance: number, kind = 'cash'): Promise<AccountBod
   )
   expect(status).toBe(201)
   return body
+}
+
+type TransactionBody = { id: string; amount: number; kind: string; note: string }
+
+/** 入出金の明細を1件打つ。金額は符号付きで、出金は負。 */
+async function createEntry(
+  accountId: string,
+  amount: number,
+  occurredOn = '2026-07-12',
+  note = '',
+): Promise<TransactionBody> {
+  const { status, body } = await req<TransactionBody>(
+    '/api/transactions',
+    jsonRequest('POST', { accountId, amount, occurredOn, note }),
+  )
+  expect(status).toBe(201)
+  return body
+}
+
+async function balanceOf(id: string): Promise<number> {
+  const { body } = await req<AccountBody[]>('/api/accounts')
+  return body.filter((a) => a.id === id)[0].balance
 }
 
 describe('貸し借りの一連の流れ', () => {
@@ -277,23 +299,55 @@ describe('ダッシュボード', () => {
     expect(body.outstandingLent).toBe(12_000)
   })
 
-  it('月次収支から平均余剰と到達見込みを出す', async () => {
-    await createAccount(500_000)
-    await req('/api/monthly-balances/2026-05', jsonRequest('PUT', { income: 300_000, expense: 240_000 }))
-    await req('/api/monthly-balances/2026-06', jsonRequest('PUT', { income: 300_000, expense: 250_000 }))
-    await req('/api/monthly-balances/2026-07', jsonRequest('PUT', { income: 300_000, expense: 230_000 }))
-
+  // 明細を打てば月次の収支は自動で出る。手入力の経路はもう無い。
+  // 月は過去に固定してある。当月は平均に含めないため。
+  it('明細から平均余剰と到達見込みを出す', async () => {
+    const account = await createAccount(500_000)
+    for (const [month, expense] of [
+      ['2026-04', 240_000],
+      ['2026-05', 250_000],
+      ['2026-06', 230_000],
+    ] as const) {
+      await createEntry(account.id, 300_000, `${month}-25`)
+      await createEntry(account.id, -expense, `${month}-05`)
+    }
+    // 3ヶ月の余剰は +60k / +50k / +70k。残高は 500,000 + 180,000。
     await req('/api/wishes', jsonRequest('POST', { title: '目標', amount: 800_000, category: 'goal' }))
 
     const { body } = await req<DashboardBody>('/api/dashboard')
 
     expect(body.hasAverageSurplus).toBe(true)
-    expect(body.averageSurplus).toBe(60_000) // (60k + 50k + 70k) / 3
-    expect(body.wishes[0].shortfall).toBe(300_000)
-    expect(body.wishes[0].monthsToReach).toBe(5) // 300,000 / 60,000
+    expect(body.averageSurplus).toBe(60_000)
+    expect(body.netAsset).toBe(680_000)
+    expect(body.wishes[0].shortfall).toBe(120_000)
+    expect(body.wishes[0].monthsToReach).toBe(2) // 120,000 / 60,000
   })
 
-  it('月次収支が無ければ到達見込みは算出不可', async () => {
+  // 明細を打ち始める前の月は、手入力の値しか残っていない。切り捨てると
+  // 3ヶ月分貯まるまで到達見込みが出せなくなる。
+  it('明細が1件も無い月は手入力の月次収支で埋まる', async () => {
+    await createAccount(500_000)
+    await givenMonthlyBalance('2026-06', 300_000, 230_000) // +70k
+
+    const { body } = await req<DashboardBody>('/api/dashboard')
+
+    expect(body.hasAverageSurplus).toBe(true)
+    expect(body.averageSurplus).toBe(70_000)
+  })
+
+  // 同じ月について両方を足すと二重計上になる。月単位でどちらか一方に決める。
+  it('明細のある月は手入力の値を使わない', async () => {
+    const account = await createAccount(500_000)
+    await givenMonthlyBalance('2026-06', 300_000, 100_000) // +200k（使われないはず）
+    await createEntry(account.id, 300_000, '2026-06-25')
+    await createEntry(account.id, -230_000, '2026-06-05')
+
+    const { body } = await req<DashboardBody>('/api/dashboard')
+
+    expect(body.averageSurplus).toBe(70_000)
+  })
+
+  it('月次の収支が無ければ到達見込みは算出不可', async () => {
     await createAccount(500_000)
     await req('/api/wishes', jsonRequest('POST', { title: '目標', amount: 800_000, category: 'goal' }))
 
@@ -304,48 +358,84 @@ describe('ダッシュボード', () => {
   })
 })
 
-describe('月次収支', () => {
-  it('同じ年月への PUT は冪等で、id が変わらない', async () => {
-    const first = await req<{ id: string; surplus: number }>(
+describe('月次の集計', () => {
+  type SummaryBody = {
+    yearMonth: string
+    income: number
+    expense: number
+    surplus: number
+    source: string
+  }
+
+  it('明細を月ごとに足し上げ、年月の降順で返す', async () => {
+    const account = await createAccount(500_000)
+    await createEntry(account.id, 300_000, '2026-06-25')
+    await createEntry(account.id, -230_000, '2026-06-05')
+    await createEntry(account.id, -3_000, '2026-05-20')
+
+    const { status, body } = await req<SummaryBody[]>('/api/monthly-summaries')
+
+    expect(status).toBe(200)
+    expect(body).toEqual([
+      {
+        yearMonth: '2026-06',
+        income: 300_000,
+        expense: 230_000,
+        surplus: 70_000,
+        source: 'entries',
+      },
+      { yearMonth: '2026-05', income: 0, expense: 3_000, surplus: -3_000, source: 'entries' },
+    ])
+  })
+
+  it('明細が1件も無い月は手入力の値が source: manual で混ざる', async () => {
+    const account = await createAccount(500_000)
+    await givenMonthlyBalance('2026-05', 300_000, 240_000)
+    await createEntry(account.id, -3_000, '2026-06-20')
+
+    const { body } = await req<SummaryBody[]>('/api/monthly-summaries')
+
+    expect(body.map((s) => [s.yearMonth, s.source])).toEqual([
+      ['2026-06', 'entries'],
+      ['2026-05', 'manual'],
+    ])
+  })
+
+  it('ウィッシュの支払いは集計に足さない', async () => {
+    const account = await createAccount(500_000)
+    const wish = await req<WishBody>(
+      '/api/wishes',
+      jsonRequest('POST', { title: 'テスト', amount: 80_000, category: 'item' }),
+    )
+    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
+    await req(
+      `/api/wishes/${wish.body.id}/pay`,
+      jsonRequest('POST', { accountId: account.id, occurredOn: '2026-06-10' }),
+    )
+
+    expect((await req<SummaryBody[]>('/api/monthly-summaries')).body).toEqual([])
+  })
+
+  it('明細が1件も無ければ空配列', async () => {
+    expect((await req<SummaryBody[]>('/api/monthly-summaries')).body).toEqual([])
+  })
+
+  // 手入力の経路は消した。同じ数字を明細と月次の2箇所に入れさせないため。
+  it('月次収支を手で書く経路は残っていない', async () => {
+    const put = await req(
       '/api/monthly-balances/2026-07',
       jsonRequest('PUT', { income: 300_000, expense: 230_000 }),
     )
-    const second = await req<{ id: string; surplus: number }>(
-      '/api/monthly-balances/2026-07',
-      jsonRequest('PUT', { income: 310_000, expense: 200_000 }),
-    )
-
-    expect(second.body.id).toBe(first.body.id)
-    expect(second.body.surplus).toBe(110_000)
-    expect((await req<unknown[]>('/api/monthly-balances')).body).toHaveLength(1)
+    expect(put.status).toBe(404)
+    expect((await req('/api/monthly-balances')).status).toBe(404)
   })
 })
 
 describe('入出金の明細', () => {
-  type TransactionBody = { id: string; amount: number; kind: string; note: string }
-
-  async function createEntry(
-    accountId: string,
-    amount: number,
-    note = '',
-  ): Promise<TransactionBody> {
-    const { status, body } = await req<TransactionBody>(
-      '/api/transactions',
-      jsonRequest('POST', { accountId, amount, occurredOn: '2026-07-12', note }),
-    )
-    expect(status).toBe(201)
-    return body
-  }
-
-  async function balanceOf(id: string): Promise<number> {
-    const { body } = await req<AccountBody[]>('/api/accounts')
-    return body.filter((a) => a.id === id)[0].balance
-  }
-
   it('出金を打つと残高が減り、履歴が残る', async () => {
     const account = await createAccount(500_000)
 
-    const entry = await createEntry(account.id, -3_000, 'コンビニ')
+    const entry = await createEntry(account.id, -3_000, '2026-07-12', 'コンビニ')
 
     expect(entry.kind).toBe('adjustment')
     expect(entry.note).toBe('コンビニ')
@@ -356,14 +446,14 @@ describe('入出金の明細', () => {
   it('入金を打つと残高が増える', async () => {
     const account = await createAccount(500_000)
 
-    await createEntry(account.id, 250_000, '給料')
+    await createEntry(account.id, 250_000, '2026-07-12', '給料')
 
     expect(await balanceOf(account.id)).toBe(750_000)
   })
 
   it('消すと残高が戻り、履歴からも消える', async () => {
     const account = await createAccount(500_000)
-    const entry = await createEntry(account.id, -3_000, 'コンビニ')
+    const entry = await createEntry(account.id, -3_000, '2026-07-12', 'コンビニ')
 
     const res = await req(`/api/transactions/${entry.id}`, authed({ method: 'DELETE' }))
 
@@ -434,7 +524,7 @@ describe('入出金の明細', () => {
   it('明細で動いた残高が実質資産に反映される', async () => {
     const account = await createAccount(500_000)
 
-    await createEntry(account.id, -3_000, 'コンビニ')
+    await createEntry(account.id, -3_000, '2026-07-12', 'コンビニ')
 
     const { body } = await req<DashboardBody>('/api/dashboard')
     expect(body.breakdown.cashTotal).toBe(497_000)

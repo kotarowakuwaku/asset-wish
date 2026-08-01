@@ -76,6 +76,16 @@ export class D1TransactionRepository implements TransactionRepository {
     return toTransaction(row)
   }
 
+  /**
+   * 全件を返す。月次の集計に使う。
+   *
+   * GROUP BY で月ごとに畳まないのは、集計を SQL に持たせないため（不変条件8）。
+   * 畳んだ結果を返すと、集計のテストに DB が要る。年間数百件なので全件で足りる。
+   */
+  listAll(): Promise<Transaction[]> {
+    return this.list(0)
+  }
+
   // 集計はしない。実質資産の計算は domain の純粋関数が持つ（不変条件8）。
   async list(limit: number): Promise<Transaction[]> {
     const { results } = await this.#db

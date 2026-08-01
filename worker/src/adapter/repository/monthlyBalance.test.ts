@@ -1,52 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { db, resetDb } from '../../../test/db'
-import { id, yen } from '../../../test/support'
-import { MonthlyBalance } from '../../domain/monthlyBalance'
-import { YearMonth } from '../../domain/yearMonth'
+import { db, givenMonthlyBalance, resetDb } from '../../../test/db'
+import { id } from '../../../test/support'
 import { D1MonthlyBalanceRepository, toMonthlyBalance } from './monthlyBalance'
 
 const repo = new D1MonthlyBalanceRepository(db)
 
 beforeEach(resetDb)
 
-function mb(year: number, month: number, income: number, expense: number): MonthlyBalance {
-  return MonthlyBalance.create(id(), YearMonth.of(year, month), yen(income), yen(expense))
-}
-
-describe('upsert', () => {
-  it('無ければ作る', async () => {
-    const saved = await repo.upsert(mb(2026, 7, 300_000, 230_000))
-
-    expect(saved.yearMonth.toString()).toBe('2026-07')
-    expect(saved.surplus()).toBe(70_000)
-    expect(await repo.listAll()).toHaveLength(1)
-  })
-
-  // PUT /api/monthly-balances/{yearMonth} が冪等であることの土台。
-  it('同じ年月なら上書きする', async () => {
-    const first = await repo.upsert(mb(2026, 7, 300_000, 230_000))
-    const second = await repo.upsert(mb(2026, 7, 310_000, 200_000))
-
-    expect(await repo.listAll()).toHaveLength(1)
-    expect(second.income).toBe(310_000)
-    expect(second.expense).toBe(200_000)
-    // 既存行の id が維持される。渡した id を返すと、DB に無い id を
-    // レスポンスへ載せることになる。
-    expect(second.id).toBe(first.id)
-  })
-
-  it('年月は YYYY-MM の形で格納される（月初日の DATE ではない）', async () => {
-    await repo.upsert(mb(2026, 7, 1, 1))
-    const row = await db.prepare('SELECT year_month FROM monthly_balances').first<{ year_month: string }>()
-    expect(row?.year_month).toBe('2026-07')
-  })
-})
-
-describe('listRecent / listAll', () => {
+describe('listAll', () => {
   async function seedThreeMonths(): Promise<void> {
-    await repo.upsert(mb(2026, 5, 300_000, 240_000))
-    await repo.upsert(mb(2026, 7, 300_000, 230_000))
-    await repo.upsert(mb(2026, 6, 300_000, 250_000))
+    await givenMonthlyBalance('2026-05', 300_000, 240_000)
+    await givenMonthlyBalance('2026-07', 300_000, 230_000)
+    await givenMonthlyBalance('2026-06', 300_000, 250_000)
   }
 
   it('年月の降順で返す', async () => {
@@ -58,19 +23,28 @@ describe('listRecent / listAll', () => {
     ])
   })
 
-  it('listRecent は件数を絞る', async () => {
-    await seedThreeMonths()
-    expect((await repo.listRecent(2)).map((m) => m.yearMonth.toString())).toEqual(['2026-07', '2026-06'])
-  })
+  it('収入・支出・余剰が復元される', async () => {
+    await givenMonthlyBalance('2026-07', 300_000, 230_000)
 
-  it('limit が0以下なら全件相当', async () => {
-    await seedThreeMonths()
-    expect(await repo.listRecent(0)).toHaveLength(3)
-    expect(await repo.listRecent(-1)).toHaveLength(3)
+    const [m] = await repo.listAll()
+    expect(m.income).toBe(300_000)
+    expect(m.expense).toBe(230_000)
+    expect(m.surplus()).toBe(70_000)
   })
 
   it('空なら空配列', async () => {
     expect(await repo.listAll()).toEqual([])
+  })
+})
+
+// 月次の収支は明細から集計する形に変えた（docs/spec-changes.md 4）。書ける文が
+// 残っていると、同じ月について明細と手入力の2つの真実ができる。
+describe('書き込みの経路', () => {
+  it('リポジトリに書き込むメソッドが無い', () => {
+    expect(Object.getOwnPropertyNames(D1MonthlyBalanceRepository.prototype)).toEqual([
+      'constructor',
+      'listAll',
+    ])
   })
 })
 
@@ -96,7 +70,7 @@ describe('CHECK 制約', () => {
   })
 
   it('同じ年月は2行入らない', async () => {
-    await repo.upsert(mb(2026, 7, 1, 1))
+    await givenMonthlyBalance('2026-07', 1, 1)
     await expect(
       db
         .prepare("INSERT INTO monthly_balances (id, year_month, income, expense) VALUES (?, '2026-07', 1, 1)")

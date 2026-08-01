@@ -6,7 +6,7 @@ import { clearToken, loadToken, saveToken } from './app/token'
 import { Accounts } from './screens/Accounts'
 import { Dashboard } from './screens/Dashboard'
 import { Loans } from './screens/Loans'
-import { MonthlyBalances } from './screens/MonthlyBalances'
+import { MonthlySummaries } from './screens/MonthlySummaries'
 import { Transactions } from './screens/Transactions'
 import { Wishes } from './screens/Wishes'
 
@@ -73,7 +73,7 @@ function App() {
         {route === 'transactions' && <Transactions client={client} />}
         {route === 'loans' && <Loans client={client} />}
         {route === 'wishes' && <Wishes client={client} />}
-        {route === 'monthly-balances' && <MonthlyBalances client={client} />}
+        {route === 'monthly-summaries' && <MonthlySummaries client={client} />}
       </main>
     </div>
   )
