@@ -5,6 +5,9 @@ import { useAsync } from '../app/useAsync'
 /**
  * AccountSelect は口座を選ばせる。
  *
+ * 3つの画面（ウィッシュの支払い・入出金・定期）から使う部品なので
+ * `components/` に置く。`screens/` は router が切り替える単位だけにする。
+ *
  * ウィッシュの支払いで使う。「どの口座の残高が動くか」を指定しないと
  * 処理が成立しない。
  *

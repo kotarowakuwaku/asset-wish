@@ -32,11 +32,6 @@ export function parseIsoDate(s: string): IsoDate | null {
   return s as IsoDate
 }
 
-/** Date の日付部分を UTC で取り出す。Clock からの生成に使う。 */
-export function toIsoDate(d: Date): IsoDate {
-  return d.toISOString().slice(0, 10) as IsoDate
-}
-
 /** ISO8601 を解釈する。解釈できなければ null。DB からの復元に使う。 */
 export function parseInstant(s: string): Instant | null {
   const parsed = new Date(s)

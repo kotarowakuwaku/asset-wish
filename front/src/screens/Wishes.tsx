@@ -19,7 +19,7 @@ import {
   wishCategoryLabel,
   wishStatusLabel,
 } from '../lib/format'
-import { AccountSelect } from './AccountSelect'
+import { AccountSelect } from '../components/AccountSelect'
 
 // 絞り込みの選択肢。undefined は「すべて」。
 const filters: { label: string; status?: WishStatus }[] = [

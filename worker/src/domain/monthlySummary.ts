@@ -111,3 +111,48 @@ export function summarizeMonths(
 
   return summaries.sort((a, b) => b.yearMonth.compare(a.yearMonth))
 }
+
+/** 平均月間余剰の算出に用いる遡及月数。 */
+export const AVERAGE_SURPLUS_MONTHS = 3
+
+/**
+ * 月間余剰を持つもの。月次の集計（MonthlySummary）と、手入力の月次収支
+ * （MonthlyBalance）の両方がこの形を満たす。
+ */
+export type MonthlyFigures = {
+  yearMonth: YearMonth
+  surplus(): Money
+}
+
+/**
+ * 直近 count ヶ月の月間余剰の平均を返す。対象が 0 件なら null。
+ *
+ * **当月は含めない。** まだ終わっていない月を混ぜると、余剰が実態より
+ * 小さく見える。月初なら家賃だけ引かれて給料がまだ、という状態になり、
+ * 月の前半だけ到達見込みが悪化する。
+ *
+ * figures は年月の昇降順を問わない。内部でコピーして降順に整列するため、
+ * 引数の配列は変更しない。件数が count 未満なら存在する分だけで平均する。
+ * 平均は0方向への切り捨て。
+ *
+ * null は「算出不可」であって 0 ではない。0 として扱うと「余剰なし」に見える。
+ */
+export function averageSurplus(
+  figures: readonly MonthlyFigures[],
+  count: number,
+  current: YearMonth,
+): Money | null {
+  if (count <= 0) return null
+
+  const completed = figures.filter((f) => f.yearMonth.before(current))
+  if (completed.length === 0) return null
+
+  const sorted = [...completed].sort((a, b) => b.yearMonth.compare(a.yearMonth)) // 降順
+  const n = Math.min(count, sorted.length)
+
+  let sum = ZERO_MONEY
+  for (const m of sorted.slice(0, n)) {
+    sum = addMoney(sum, m.surplus())
+  }
+  return Math.trunc(sum / n) as Money
+}

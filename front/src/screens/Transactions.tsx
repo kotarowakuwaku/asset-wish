@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { errorMessage, type ApiClient } from '../api/client'
 import type { Transaction } from '../api/types'
 import { useAsync } from '../app/useAsync'
+import { useSubmit } from '../app/useSubmit'
 import {
   Badge,
   Empty,
@@ -13,7 +14,7 @@ import {
   Section,
 } from '../components/common'
 import { formatDate, parseAmount, todayISO, transactionKindLabel } from '../lib/format'
-import { AccountSelect } from './AccountSelect'
+import { AccountSelect } from '../components/AccountSelect'
 
 /** 入金か出金か。画面の中だけの区別で、サーバーへは金額の符号として送る。 */
 type Direction = 'out' | 'in'
@@ -135,24 +136,11 @@ function DeleteTransactionButton({
   transaction: Transaction
   onDeleted: () => void
 }) {
-  const [message, setMessage] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const remove = async () => {
-    setBusy(true)
-    try {
-      await client.deleteTransaction(transaction.id)
-      onDeleted()
-    } catch (e) {
-      setMessage(errorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { busy, message, submit } = useSubmit(() => client.deleteTransaction(transaction.id), onDeleted)
 
   return (
     <>
-      <button type="button" onClick={remove} disabled={busy}>
+      <button type="button" onClick={submit} disabled={busy}>
         削除
       </button>
       <FormError message={message} />
