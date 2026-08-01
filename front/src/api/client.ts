@@ -5,6 +5,7 @@ import type {
   Loan,
   LoanDirection,
   MonthlySummary,
+  RecurringEntry,
   Transaction,
   Wish,
   WishStatus,
@@ -176,6 +177,19 @@ export function createClient(token: string) {
     // 登録の経路は無い。月次の収支は明細から集計される。同じ数字を明細と
     // 月次の2箇所に入れさせないため、サーバー側から書き込みの口ごと消した。
     listMonthlySummaries: () => get<MonthlySummary[]>('/api/monthly-summaries'),
+
+    listRecurringEntries: () => get<RecurringEntry[]>('/api/recurring-entries'),
+    // 金額は符号付き。給料は正、家賃は負。appliedThrough は送れない
+    // （適用の記録はサーバーが持つ。送ると 400）。
+    createRecurringEntry: (input: {
+      name: string
+      accountId: string
+      amount: number
+      dayOfMonth: number
+    }) => post<RecurringEntry>('/api/recurring-entries', input),
+    // 未適用の分をまとめて適用し、件数を受け取る。自動では起きない。
+    applyRecurringEntries: () => post<{ applied: number }>('/api/recurring-entries/apply'),
+    deleteRecurringEntry: (id: string) => del(`/api/recurring-entries/${id}`),
 
     listTransactions: () => get<Transaction[]>('/api/transactions'),
     // 金額は符号付き。出金は負、入金は正。kind は送れない（送ると 400）。

@@ -24,6 +24,7 @@ beforeEach(() => {
     fakes.wishes,
     fakes.transactions,
     fakes.balances,
+    fakes.recurring,
     fixedClock(NOW),
   )
 })

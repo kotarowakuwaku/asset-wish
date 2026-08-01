@@ -9,6 +9,7 @@
 import { D1AccountRepository } from './adapter/repository/account'
 import { D1LoanRepository } from './adapter/repository/loan'
 import { D1MonthlyBalanceRepository } from './adapter/repository/monthlyBalance'
+import { D1RecurringRepository } from './adapter/repository/recurring'
 import { D1TransactionRepository } from './adapter/repository/transaction'
 import { D1WishRepository } from './adapter/repository/wish'
 import { D1AtomicWriter } from './adapter/repository/writer'
@@ -20,6 +21,7 @@ import { AccountUsecase } from './usecase/account'
 import { DashboardUsecase } from './usecase/dashboard'
 import { LoanUsecase } from './usecase/loan'
 import { MonthlySummaryUsecase } from './usecase/monthlySummary'
+import { RecurringUsecase } from './usecase/recurring'
 import { newUUID, systemClock } from './usecase/port'
 import { TransactionUsecase } from './usecase/transaction'
 import { WishUsecase } from './usecase/wish'
@@ -36,6 +38,7 @@ export function buildDeps(env: Env): Deps {
   const wishRepo = new D1WishRepository(env.DB)
   const balanceRepo = new D1MonthlyBalanceRepository(env.DB)
   const transactionRepo = new D1TransactionRepository(env.DB)
+  const recurringRepo = new D1RecurringRepository(env.DB)
   const writer = new D1AtomicWriter(env.DB)
 
   const now = systemClock
@@ -50,12 +53,15 @@ export function buildDeps(env: Env): Deps {
     summaries: new MonthlySummaryUsecase(transactionRepo, balanceRepo),
     // 明細の登録・削除は口座残高を動かすため、writer と accountRepo が要る。
     transactions: new TransactionUsecase(writer, transactionRepo, accountRepo, now, newID),
+    // 定期入出金は口座残高を動かすため、writer と accountRepo が要る。
+    recurring: new RecurringUsecase(writer, recurringRepo, accountRepo, now, newID),
     dashboard: new DashboardUsecase(
       accountRepo,
       loanRepo,
       wishRepo,
       transactionRepo,
       balanceRepo,
+      recurringRepo,
       now,
     ),
     now,

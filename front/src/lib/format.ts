@@ -120,6 +120,7 @@ const transactionKindLabels: Record<string, string> = {
   // 手入力の明細。以前は「残高の調整」と呼んでいたが、作る経路が無く
   // 1件も存在しなかった。入出金を打てるようにしたのに伴い意味を与えた。
   adjustment: '入出金',
+  recurring_applied: '定期',
 }
 
 export function transactionKindLabel(kind: string): string {

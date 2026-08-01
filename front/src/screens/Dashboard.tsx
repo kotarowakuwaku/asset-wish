@@ -1,10 +1,11 @@
-import { useCallback } from 'react'
-import type { ApiClient } from '../api/client'
+import { useCallback, useState } from 'react'
+import { errorMessage, type ApiClient } from '../api/client'
 import { useAsync } from '../app/useAsync'
 import {
   Badge,
   Empty,
   ErrorMessage,
+  FormError,
   Loading,
   Money,
   Section,
@@ -56,6 +57,20 @@ export function Dashboard({ client }: { client: ApiClient }) {
           </div>
         </dl>
       </section>
+
+      {/* 未適用の定期入出金。**背景で勝手に適用しない。** 何が起きたかが
+          常に見えるようにするため、押したときだけ残高が動く
+          （docs/spec-changes.md 5）。0件のときは何も出さない。 */}
+      {data.pendingRecurringCount > 0 && (
+        <Section title="未適用の定期入出金">
+          <ApplyRecurring
+            client={client}
+            count={data.pendingRecurringCount}
+            total={data.pendingRecurringTotal}
+            onApplied={reload}
+          />
+        </Section>
+      )}
 
       {/* 実質資産には足さない参考値（不変条件4）。立て替えた時点で現金が
           出たとは限らないため（カード払いなら引き落としはまだ）、
@@ -136,6 +151,55 @@ export function Dashboard({ client }: { client: ApiClient }) {
           </ul>
         )}
       </Section>
+    </>
+  )
+}
+
+/**
+ * ApplyRecurring は未適用の定期入出金をまとめて適用する。
+ *
+ * **押したときだけ残高が動く。** 画面を開いただけでは何も起きない。
+ * 2ヶ月開かなかった場合は2ヶ月分がまとめて入る。
+ *
+ * 件数も合計もサーバーが数えた値をそのまま出す。ここで数え直すと、
+ * 表示していた件数と実際に動く件数がずれる余地ができる。
+ */
+function ApplyRecurring({
+  client,
+  count,
+  total,
+  onApplied,
+}: {
+  client: ApiClient
+  count: number
+  total: number
+  onApplied: () => void
+}) {
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const apply = async () => {
+    setBusy(true)
+    try {
+      await client.applyRecurringEntries()
+      setMessage(null)
+      onApplied()
+    } catch (e) {
+      setMessage(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <p>
+        {count}件（合計 <Money amount={total} />）が未適用です。
+      </p>
+      <FormError message={message} />
+      <button type="button" onClick={apply} disabled={busy}>
+        適用する
+      </button>
     </>
   )
 }

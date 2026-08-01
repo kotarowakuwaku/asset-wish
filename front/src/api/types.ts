@@ -79,8 +79,10 @@ export type TransactionKind =
   | 'lending_created'
   | 'lending_collected'
   | 'wish_paid'
-  /** 手入力の入出金の明細。新しく作れるのはこれだけで、消せるのもこれだけ。 */
+  /** 手入力の入出金の明細。**消せるのはこれだけ。** */
   | 'adjustment'
+  /** 定期入出金の適用。refId は定期入出金を指す。消せない */
+  | 'recurring_applied'
 
 export type Transaction = {
   id: string
@@ -95,6 +97,24 @@ export type Transaction = {
    * 手入力の明細以外では空文字になる。
    */
   note: string
+}
+
+/**
+ * 定期入出金。給料・家賃など、毎月決まった日に口座を増減させるもの。
+ *
+ * 適用は自動では起きない。ダッシュボードに未適用の件数が出て、そこから
+ * 明示的に実行する。
+ */
+export type RecurringEntry = {
+  id: string
+  name: string
+  accountId: string
+  /** 符号付き。給料は正、家賃は負。入出金の明細と同じ約束。 */
+  amount: number
+  /** 毎月の適用日。1〜31。月末の無い月はサーバーが末日に丸める。 */
+  dayOfMonth: number
+  /** YYYY-MM。この年月までは適用済み。 */
+  appliedThrough: string
 }
 
 export type DashboardWish = Wish & {
@@ -127,5 +147,9 @@ export type Dashboard = {
   averageSurplus: number
   /** false のとき averageSurplus は 0 が入るが、表示してはいけない。 */
   hasAverageSurplus: boolean
+  /** まだ適用していない定期入出金の件数。0 なら何も出さない。 */
+  pendingRecurringCount: number
+  /** 未適用分の合計。符号付きで、収入と支出は相殺されている。 */
+  pendingRecurringTotal: number
   wishes: DashboardWish[]
 }

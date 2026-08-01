@@ -9,7 +9,8 @@ export const TRANSACTION_KINDS = [
   'lending_created', // 貸し借りの発生。口座から出る
   'lending_collected', // 貸し借りの精算。口座に戻る
   'wish_paid', // ウィッシュの支払い。口座から出る
-  'adjustment', // 残高の手動調整
+  'adjustment', // 手で打った入出金の明細
+  'recurring_applied', // 定期入出金の適用。参照先は recurring_entries
 ] as const
 
 /** DB の CHECK 制約と同じ値を持つ。 */
@@ -19,9 +20,22 @@ export function isTransactionKind(v: string): v is TransactionKind {
   return (TRANSACTION_KINDS as readonly string[]).includes(v)
 }
 
-/** 参照先（貸し借り・ウィッシュ）を必ず伴う種別か。adjustment だけが参照先を持たない。 */
+/** 参照先を必ず伴う種別か。adjustment だけが参照先を持たない。 */
 export function requiresReference(kind: TransactionKind): boolean {
   return kind !== 'adjustment'
+}
+
+/**
+ * 口座の入出金そのものを表す種別か。
+ *
+ * 手で打った明細（`adjustment`）と定期入出金の適用（`recurring_applied`）が
+ * これにあたる。**月次の集計に足すのも、メモを持てるのも、この2つだけ。**
+ *
+ * 残りは他の操作の副産物で、ウィッシュの支払いや貸し借りの発生を後から
+ * 辿るための記録。生活費の収支としては数えない（不変条件2の考え方）。
+ */
+export function isCashFlowKind(kind: TransactionKind): boolean {
+  return kind === 'adjustment' || kind === 'recurring_applied'
 }
 
 /**
@@ -96,9 +110,10 @@ export class Transaction {
       // adjustment に参照先を持たせない。渡されても落とす。
       requiresReference(kind) ? refId : null,
       occurredOn,
-      // 参照先を持つ種別にメモを持たせない。落とす理由は参照先と同じで、
-      // 「メモがあるのに手入力ではない」行を後から疑わずに済むようにするため。
-      requiresReference(kind) ? '' : note,
+      // メモを持てるのは口座の入出金そのものを表す種別だけ。ウィッシュや
+      // 貸し借りの副産物は、参照先をたどれば何の取引か分かるので要らない。
+      // 定期入出金の適用は名称をここに写す。参照先を消しても履歴が読めるように。
+      isCashFlowKind(kind) ? note : '',
     )
   }
 
@@ -117,14 +132,24 @@ export class Transaction {
   }
 
   /**
-   * 手で打った入出金の明細か。
+   * 手で打った入出金の明細か。**消せるのはこれだけ。**
    *
-   * 参照先を持つ履歴（ウィッシュの支払い・過去の貸し借り）は、それぞれの
-   * 操作の副産物であって、自分で打った記録ではない。**消せるのも、月次の
-   * 集計に足すのも、これが true のものだけ。**
+   * 定期入出金の適用は false。適用済みの年月を別に記録しているため、履歴だけ
+   * 消すと「適用したのに履歴が無い」状態になり、二重適用の防止と食い違う。
+   * 消したいときは定期入出金そのものを消す。
    */
   isManualEntry(): boolean {
-    return !requiresReference(this.kind)
+    return this.kind === 'adjustment'
+  }
+
+  /**
+   * 月次の集計に足すか。**手で打った明細と、定期入出金の適用だけ。**
+   *
+   * ウィッシュの支払いを足さないのは、ライブ代のような臨時支出を月の余剰に
+   * 混ぜると、何か買うたびに他の目標の到達見込みが悪化するため（不変条件2）。
+   */
+  countsTowardMonthlySummary(): boolean {
+    return isCashFlowKind(this.kind)
   }
 
   /**

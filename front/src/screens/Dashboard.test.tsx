@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '../api/client'
 import type { Dashboard as DashboardData } from '../api/types'
 import { Dashboard } from './Dashboard'
@@ -27,6 +27,8 @@ const base: DashboardData = {
   outstandingBorrowed: 5000,
   averageSurplus: 65000,
   hasAverageSurplus: true,
+  pendingRecurringCount: 0,
+  pendingRecurringTotal: 0,
   wishes: [],
 }
 
@@ -282,6 +284,62 @@ describe('ウィッシュ', () => {
       expect(
         screen.getByText('登録されているウィッシュはありません。'),
       ).toBeInTheDocument()
+    })
+  })
+})
+
+// 背景で勝手に適用しない。押したときだけ残高が動く（docs/spec-changes.md 5）。
+describe('未適用の定期入出金', () => {
+  it('0件なら何も出さない', async () => {
+    render(<Dashboard client={stubClient(base)} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('実質資産')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('未適用の定期入出金')).not.toBeInTheDocument()
+  })
+
+  it('件数と合計を出す', async () => {
+    render(
+      <Dashboard
+        client={stubClient({ ...base, pendingRecurringCount: 2, pendingRecurringTotal: 170000 })}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('未適用の定期入出金')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/2件/)).toBeInTheDocument()
+    expect(screen.getByText('¥170,000')).toBeInTheDocument()
+  })
+
+  it('押すまで適用しない', async () => {
+    const applyRecurringEntries = vi.fn(() => Promise.resolve({ applied: 2 }))
+    render(
+      <Dashboard
+        client={
+          {
+            getDashboard: () =>
+              Promise.resolve({
+                ...base,
+                pendingRecurringCount: 2,
+                pendingRecurringTotal: 170000,
+              }),
+            applyRecurringEntries,
+          } as unknown as ApiClient
+        }
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '適用する' })).toBeInTheDocument()
+    })
+    expect(applyRecurringEntries).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '適用する' }))
+
+    await waitFor(() => {
+      expect(applyRecurringEntries).toHaveBeenCalled()
     })
   })
 })

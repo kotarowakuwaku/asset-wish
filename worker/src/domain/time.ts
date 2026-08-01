@@ -58,6 +58,16 @@ export function yearMonthOf(value: IsoDate | Instant): string {
   return value.slice(0, 7)
 }
 
+/**
+ * 時刻から日付部分を取り出す。
+ *
+ * 定期入出金の「適用日が来たか」の判定に使う。Instant は必ず UTC 表記なので、
+ * 切り出した日付も UTC。ここに動作環境のタイムゾーンは入らない。
+ */
+export function dateOf(instant: Instant): IsoDate {
+  return instant.slice(0, 10) as IsoDate
+}
+
 /** 2つの時刻の差をミリ秒で返す。a - b。 */
 export function instantDiffMillis(a: Instant, b: Instant): number {
   return Date.parse(a) - Date.parse(b)

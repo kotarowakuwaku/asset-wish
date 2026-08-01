@@ -23,7 +23,9 @@
 > 1. **入出金の明細を1件ずつ打てるようにした。** 明細を打つと口座残高が動き、削除すると戻る。分類（カテゴリ）は持たない。`transactions.note` の追加と、`POST` / `DELETE /api/transactions` が該当する。
 > 2. **月次収支の手入力をやめ、明細から集計する形にした。** `PUT /api/monthly-balances/{yearMonth}` は廃止し、`GET /api/monthly-summaries` に置き換わった。`monthly_balances` の表は残っているが**読み取り専用**で、明細が1件も無い月を埋めるためだけに使う。**平均月間余剰から当月を除くようにした**（3.5 の計算式が影響を受ける）。
 >
-> **要件定義書は v1.3 が正。**
+> **仕様変更について（2026-08-01、3件目）：** **定期入出金（給料・家賃）を足した。** `recurring_entries` を追加し、`transactions.kind` に `recurring_applied` を足すためテーブルを作り直した（SQLite は CHECK を後から足せない）。適用は**アプリを開いたときに、押したときだけ**まとめて行う。Cron Trigger は使わない。
+>
+> **要件定義書は v1.4 が正。**
 
 ---
 
@@ -131,7 +133,24 @@ CREATE TABLE transactions (
 );
 
 CREATE INDEX idx_transactions_account_date ON transactions (account_id, occurred_on DESC);
+
+-- 定期入出金（0004 で追加）
+CREATE TABLE recurring_entries (
+    id         TEXT    PRIMARY KEY,
+    name       TEXT    NOT NULL,
+    account_id TEXT    NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    -- 符号付き。給料は正、家賃は負。入出金の明細と同じ約束。
+    amount     INTEGER NOT NULL CHECK (amount <> 0),
+    day_of_month INTEGER NOT NULL CHECK (day_of_month BETWEEN 1 AND 31),
+    -- この年月までは適用済み。次に適用するのはこの翌月から。
+    applied_through TEXT NOT NULL
+        CHECK (applied_through GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 ```
+
+なお 0004 で `transactions.kind` に `'recurring_applied'` を足している（上の DDL は 0001 時点のもの）。
 
 SQLite には `UUID` / `DATE` / `TIMESTAMPTZ` の型が無い。**Postgres では型そのものが日付らしさを保証していたが、`TEXT` には何の保証も無いため、型が担っていた検査を `CHECK` + `GLOB` で埋め直している。**
 
@@ -150,6 +169,10 @@ SQLite には `UUID` / `DATE` / `TIMESTAMPTZ` の型が無い。**Postgres で�
 **`transactions.note` に分類（カテゴリ）を持たせない理由**
 
 入出金の明細で「何に使ったか」は自由記述のメモで足りる。分類を持たせると、次に来るのは分類別の集計で、そこまで行くとこのアプリは「実質資産を見る道具」から家計簿になる（`CLAUDE.md`「やらないこと」）。
+
+**`applied_through` を NULL にしない理由**
+
+「まだ一度も適用していない」を NULL で表さず、登録時に**登録月の前月**を入れる。未適用月の算出が常に「`applied_through` の翌月から」になり、null の場合分けが消える。「起点は当月」という決定が、値そのもので表現される。
 
 **`kind = 'adjustment'` の意味づけ**
 
@@ -474,6 +497,10 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | POST | `/api/wishes/{id}/drop` | → 見送り |
 | DELETE | `/api/wishes/{id}` | ウィッシュ削除 |
 | GET | `/api/monthly-summaries` | 月次の集計（降順。明細から導出） |
+| GET | `/api/recurring-entries` | 定期入出金の一覧 |
+| POST | `/api/recurring-entries` | 定期入出金の登録（口座は動かない） |
+| POST | `/api/recurring-entries/apply` | 未適用分をまとめて適用 |
+| DELETE | `/api/recurring-entries/{id}` | 定期入出金の削除（履歴は残る） |
 | GET | `/api/transactions` | 取引履歴 |
 | POST | `/api/transactions` | 入出金の明細を打つ（口座残高が動く） |
 | DELETE | `/api/transactions/{id}` | 明細の削除（残高を戻す。手入力のもののみ） |

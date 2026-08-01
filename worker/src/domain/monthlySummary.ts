@@ -61,7 +61,8 @@ export class MonthlySummary {
  *
  * ## 何を足すか
  *
- * 足すのは手入力の明細（`adjustment`）だけ。ウィッシュの支払いと、過去の
+ * 足すのは口座の入出金そのものを表す種別だけ——手で打った明細（`adjustment`）
+ * と定期入出金の適用（`recurring_applied`）。ウィッシュの支払いと、過去の
  * 貸し借りの履歴は除く。**ライブ代のような臨時支出を月の余剰に混ぜると、
  * 何か買うたびに他の目標の到達見込みが悪化する。** 生活費とウィッシュ由来の
  * 支出を分けるという不変条件2の考え方を、集計にも引き継いでいる。
@@ -85,7 +86,7 @@ export function summarizeMonths(
   const byMonth = new Map<string, { income: Money; expense: Money }>()
 
   for (const t of transactions) {
-    if (!t.isManualEntry()) continue
+    if (!t.countsTowardMonthlySummary()) continue
 
     const key = yearMonthOf(t.occurredOn)
     const month = byMonth.get(key) ?? { income: ZERO_MONEY, expense: ZERO_MONEY }
