@@ -55,10 +55,10 @@ export type WishService = {
   delete(id: string): Promise<void>
 }
 
-// 手入力の経路は無い。月次の収支は明細から集計する（docs/spec-changes.md 4）。
+// 手入力の経路は無い。月次の収支は明細から集計する（docs/decisions.md 2.4）。
 // 同じ数字を明細と月次の2箇所に入れさせないため、書き込みの口ごと消してある。
 // 適用は自動では起きない。件数はダッシュボードに出し、実行は明示的に呼ぶ
-// （docs/spec-changes.md 5）。登録の時点では口座を触らない。
+// （docs/decisions.md 2.5）。登録の時点では口座を触らない。
 export type RecurringService = {
   list(): Promise<RecurringEntry[]>
   create(

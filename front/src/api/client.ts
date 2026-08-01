@@ -49,7 +49,7 @@ export class ApiError extends Error {
 /**
  * baseUrl は API の基底 URL。**空文字＝同一オリジン。**
  *
- * front と API は同じ Worker から配信される（docs/migration-cloudflare.md 9章）。
+ * front と API は同じ Worker から配信される（docs/architecture.md 1章）。
  * 相対パスで足りるため、環境変数での切り替えも要らない。
  *
  * ここを絶対 URL に戻すと CORS が復活する。**戻さないこと。**

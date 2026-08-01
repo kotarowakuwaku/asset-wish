@@ -52,7 +52,7 @@ export class TransactionUsecase {
    * 一覧も符号付きで返しているため。入口だけ形を変えると表現が2つになる。
    *
    * 種別は adjustment。分類（カテゴリ）は持たない。何に使ったかは note を
-   * 読めば分かる（docs/spec-changes.md 3）。
+   * 読めば分かる（docs/decisions.md 2.3）。
    *
    * **残高の更新と履歴の記録は必ず同じ batch に載せる（不変条件10）。**
    * 片方だけ残ると、残高の裏付けを辿れない行か、裏付けの無い残高ができる。

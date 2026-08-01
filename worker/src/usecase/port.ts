@@ -34,7 +34,7 @@ export function isNotFoundError(err: unknown): err is NotFoundError {
  * handler で 409 に対応させる。
  *
  * D1 にトランザクションが無いため、読み取り時の値を UPDATE の条件に含める
- * 楽観ロックで守っている（docs/migration-cloudflare.md 4章の案 A）。
+ * 楽観ロックで守っている（docs/architecture.md 3章）。
  * 単一ユーザーでも PC とスマホ、あるいは複数タブで起こりうる。
  *
  * リトライはしない。握り潰して書き換えるより、気付けるほうがよい。
@@ -123,7 +123,7 @@ export interface WishRepository {
 /**
  * 手入力の月次収支。**読み取り専用。**
  *
- * 月次の収支は明細から集計する形に変えた（docs/spec-changes.md 4）。この
+ * 月次の収支は明細から集計する形に変えた（docs/decisions.md 2.4）。この
  * テーブルに残っているのは、明細を打ち始める前に手で入れた過去の記録だけで、
  * **新しく書く経路は無い。** upsert を消してあるのは、書ける口が残っていると
  * 同じ月について明細と手入力の2つの真実ができるため。

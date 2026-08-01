@@ -4,7 +4,7 @@
 // 片方だけ変えると、型は通るのに実行時に undefined を触ることになるため、
 // あちらを変えたらここも直す。
 //
-// 金額はすべて円単位の整数。文字列にはしない（detailed-design 6）。
+// 金額はすべて円単位の整数。文字列にはしない（docs/architecture.md 5章）。
 
 export type AccountKind = 'cash' | 'investment'
 

@@ -1,5 +1,5 @@
 // 日付と時刻。Go 版の time.Time を用途別の branded string に置き換えたもの
-//（docs/migration-cloudflare.md 10章 #3）。
+//（docs/architecture.md 5章）。
 //
 // Date を使わないのは、Date が必ずタイムゾーンを持つため。UTC 深夜0時の Date を
 // JST で表示すると前日になり、日付だけを扱いたい列で事故る。YearMonth が

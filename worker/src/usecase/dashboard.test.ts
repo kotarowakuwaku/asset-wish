@@ -63,7 +63,7 @@ function seedWish(
  * 明細を打ち始める前の月を用意する。
  *
  * 月次の収支は明細から集計するようになったが、明細が1件も無い月に限って
- * この手入力の値が使われる（docs/spec-changes.md 4）。
+ * この手入力の値が使われる（docs/decisions.md 2.4）。
  */
 function seedBalance(year: number, month: number, income: number, expense: number): void {
   fakes.balances.seed(

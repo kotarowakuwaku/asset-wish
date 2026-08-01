@@ -53,7 +53,7 @@ export class Transaction {
   readonly kind: TransactionKind
   /**
    * 貸し借りまたはウィッシュの ID。adjustment のときだけ null。
-   * 参照先が2種類あるため DB では外部キーを張れない（docs/design.md 2.3）。
+   * 参照先が2種類あるため DB では外部キーを張れない（docs/architecture.md 5章）。
    */
   readonly refId: string | null
   readonly occurredOn: IsoDate

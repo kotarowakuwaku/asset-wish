@@ -90,7 +90,7 @@ export class Loan {
    *
    * 過精算・負の精算額・不正な向きの行は CHECK 制約で入らないが、すり抜けた
    * 場合はここで止める。CHECK 制約をすり抜けた値を domain に渡さないための
-   * 最後の関門（docs/design.md「D1 の扱い」）。
+   * 最後の関門（docs/architecture.md 3章）。
    */
   static restore(
     id: string,

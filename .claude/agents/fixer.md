@@ -40,7 +40,7 @@ model: opus
 
 - **depguard 違反** — `internal/domain` が `database/sql` / `net/http` / sqlc 生成コード / `internal/adapter` / `internal/infra` を import した。ドメインに外から型が漏れてきている。
 - **金額の型** — `int64` を裸で持ち回った。境界（DB・JSON）以外では `domain.Money`。
-- **切り上げ除算の off-by-one** — 到達見込みは `(a + b - 1) / b`。`docs/design.md` 6.1 のケース16と17が対になっていて、両方通らないと検出できない。
+- **切り上げ除算の off-by-one** — 到達見込みは `(a + b - 1) / b`。`worker/src/domain/netAsset.test.ts` の monthsToReach のケースが対になっていて、両方通らないと検出できない。
 - **投資口座の混入** — 実質資産の計算に `kind = 'investment'` が入った。テストが落ちているならアプリの存在意義に触れている箇所なので、最優先で正しく直す。
 - **状態遷移の判定位置** — `usecase` / `handler` に `if status == ...` を書いた。判定は domain のエンティティメソッド。
 

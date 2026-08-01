@@ -8,7 +8,7 @@ import { ApiError, createClient } from './client'
 //   204 に本文が無いことを扱えるか
 //
 // 業務ルールの正しさはサーバー側のテストが担保している。
-// ここで同じことを検証しない（docs/design.md 6章）。
+// ここで同じことを検証しない（docs/architecture.md 8章）。
 
 const token = 'test-token'
 

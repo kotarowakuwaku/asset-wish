@@ -6,7 +6,7 @@ import type { MonthlyBalanceRepository, TransactionRepository } from './port'
  *
  * **手入力の経路は無い。** 入出金の明細を打てば、その月の収支は自動で出る。
  * 同じ数字を2箇所に入れさせないため、月次収支の登録 API と画面は廃止した
- *（docs/spec-changes.md 4）。
+ *（docs/decisions.md 2.4）。
  *
  * 明細が1件も無い月に限り、廃止前に手入力された `monthly_balances` の値を
  * 使う。**テーブルを残しているのは過去の記録のためで、新しく書く経路は無い。**
