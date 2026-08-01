@@ -122,17 +122,18 @@ jobs:
           path: front/playwright-report/
           retention-days: 7
 
-  # ブランチ保護から参照する集約ジョブ。**必須チェックはこの ci ひとつだけにする。**
+  # 全ジョブの結果を集約する。**ブランチ保護が必須にするのはこの ci だけ。**
   #
-  # worker / front は paths フィルタで skip されうるため、個別に必須
-  # チェックへ登録すると運用が破綻する。かといって changes だけを必須にすると、
-  # テストが落ちていてもマージできてしまう（実際そうなっていた）。
+  # 個別のジョブ名を必須にできないのは、paths-filter で skip されうるため。
+  # かといって changes（paths-filter そのもの）を必須にすると、テストが
+  # 落ちていてもマージできてしまう（実際に一度この状態になっていた）。
   #
-  # ここで結果を一本にまとめる。skip は通過扱い、それ以外の非 success は落とす。
-  # 新しいジョブを足したら needs にも必ず追加すること。忘れるとそのジョブは
-  # 保護の対象外になり、静かに検証の網から漏れる。
+  # **CI にジョブを追加したら、ここの needs にも必ず足すこと。**
+  # 忘れるとそのジョブは保護の対象外になり、静かに検証の網から漏れる。
+  # 落ちているのに気付けない検証は、無いより悪い。
+  # scripts/check-constraints.sh がこの漏れを検出する。
   ci:
-    needs: [changes, worker, front]
+    needs: [changes, constraints, worker, front]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -140,6 +141,7 @@ jobs:
         env:
           RESULTS: >-
             changes=${{ needs.changes.result }}
+            constraints=${{ needs.constraints.result }}
             worker=${{ needs.worker.result }}
             front=${{ needs.front.result }}
         run: |

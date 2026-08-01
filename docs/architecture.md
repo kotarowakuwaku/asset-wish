@@ -315,6 +315,24 @@ docs/              この文書と、ドメイン・要件・決定の記録
 
 **秘密情報をリポジトリに入れない**（不変条件17）。`AUTH_TOKEN` は `wrangler secret put` で登録し、手元は `.dev.vars`（gitignore 済み）。読み出しは `worker/src/infra/config.ts` に集約する。
 
+### CI の検証の網
+
+**ブランチ保護が必須にするのは `ci` ジョブひとつだけ。**
+
+個別のジョブ名を必須にできないのは、`worker` / `front` が paths-filter で skip されうるため。かといって `changes`（paths-filter そのもの）を必須にすると、**テストが落ちていてもマージできてしまう**（実際に一度この状態になっていた）。
+
+`ci` は全ジョブの結果を集約し、skip は通過扱い、それ以外の非 success は落とす。
+
+**CI にジョブを追加したら、`ci` の `needs` にも必ず足すこと。** 忘れるとそのジョブは保護の対象外になり、静かに検証の網から漏れる。**落ちているのに気付けない検証は、無いより悪い。** `scripts/check-constraints.sh` がこの漏れを検出する（これも一度やった）。
+
+**CI で LLM は回さない。** 従量課金か利用枠の消費が発生し、月額0円の前提が崩れる（不変条件15・16）。読んでの深いレビューは手元の `/architecture-review` が持つ。
+
+### リポジトリを public にしている理由
+
+GitHub Actions の実行時間が無制限で無料になるため。private の Free プランは月2,000分で、ジョブごとに分単位で切り上げられる。エージェントにループを回させる以上 CI の実行回数が読めず、分数を気にして検証を削るのは本末転倒。
+
+**代償として、秘密情報の事故が即座に致命的になる。** push protection を有効にし、コミットの Author には GitHub の noreply アドレスを使う。
+
 ### 使わないもの
 
 KV / R2 / Queues / Durable Objects / Workers AI は使う理由が無い。Cloudflare Access は `*.workers.dev` に適用できず、独自ドメインが要るため使えない。
