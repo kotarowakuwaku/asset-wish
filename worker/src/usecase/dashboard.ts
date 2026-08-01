@@ -1,18 +1,22 @@
 import type { Money } from '../domain/money'
 import {
-  AVERAGE_SURPLUS_MONTHS,
-  averageSurplus,
   calculateBreakdown,
   calculateInvestmentTotal,
   calculateOutstandingLoans,
-  calculateShortfall,
-  monthlySavingNeeded,
-  monthsToReach,
   netAsset,
   type NetAssetBreakdown,
   type OutstandingLoans,
 } from '../domain/netAsset'
-import { summarizeMonths } from '../domain/monthlySummary'
+import {
+  AVERAGE_SURPLUS_MONTHS,
+  averageSurplus,
+  summarizeMonths,
+} from '../domain/monthlySummary'
+import {
+  calculateShortfall,
+  monthlySavingNeeded,
+  monthsToReach,
+} from '../domain/wishProgress'
 import { pendingApplications, pendingTotal } from '../domain/recurring'
 import { dateOf, yearMonthOf } from '../domain/time'
 import { isTerminalWishStatus, type Wish } from '../domain/wish'
