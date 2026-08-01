@@ -110,6 +110,9 @@ export function dashboardResponse(d: Dashboard) {
     // investmentTotal と outstanding* はどちらも実質資産の外の参考値。
     // breakdown に混ぜないのは、合計に足されない値だと形で示すため
     // （不変条件1・4）。
+    // 来月初めの見込み。今ある額（breakdown.cashTotal）に定期入出金を
+    // 足し引きしたもの。確定した支出は含めない。
+    projectedBalance: d.projectedBalance,
     investmentTotal: d.investmentTotal,
     // 貸しと借りは分けて返す。差額にすると、誰にいくら貸しているのかが消える。
     outstandingLent: d.outstanding.lent,
