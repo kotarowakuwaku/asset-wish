@@ -45,6 +45,20 @@ jobs:
               - 'front/**'
               - '.github/workflows/ci.yml'
 
+  # 不変条件のうち機械的に検出できるものだけを見る。
+  #
+  # **paths-filter に掛けず、常に走らせる。** 文書だけの変更でも参照切れは
+  # 起きるし、front だけの変更でも front の制約は破れる。数秒で終わるので
+  # 無料枠への影響も無い。
+  #
+  # 判断が要るレビューはここでは行わない（`/architecture-review` の担当）。
+  # CI で LLM を回すと従量課金か利用枠の消費が発生し、月額0円の前提が崩れる。
+  constraints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-constraints.sh
+
   # Cloudflare Workers 側。テストは workerd の中で走るため、Node の API に
   # 依存した実装が紛れ込むとここで落ちる。
   worker:

@@ -278,7 +278,7 @@ export function createApp(deps: Deps) {
    * 未適用の分をまとめて適用する。適用した件数を返す。
    *
    * **自動では起きない。** 背景で勝手に動かない分、何が起きたかが常に見える
-   * （docs/spec-changes.md 5）。2ヶ月開かなかった場合は2ヶ月分がまとめて入る。
+   * （docs/decisions.md 2.5）。2ヶ月開かなかった場合は2ヶ月分がまとめて入る。
    * 2つのタブから同時に押せば、2度目は 409 になり残高は二重に動かない。
    */
   app.post('/api/recurring-entries/apply', async (c) => {
@@ -299,7 +299,7 @@ export function createApp(deps: Deps) {
    *
    * **登録の経路は無い。** 明細を打てばその月の収支は自動で出る。手入力の
    * 経路を残すと、同じ数字を明細と月次の2箇所に入れることになり、どちらが
-   * 正なのかが決まらない（docs/spec-changes.md 4）。
+   * 正なのかが決まらない（docs/decisions.md 2.4）。
    *
    * 明細が1件も無い月に限り、廃止前に手入力された値が `source: "manual"`
    * として混ざる。

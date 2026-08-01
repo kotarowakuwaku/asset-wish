@@ -60,7 +60,7 @@ export function Dashboard({ client }: { client: ApiClient }) {
 
       {/* 未適用の定期入出金。**背景で勝手に適用しない。** 何が起きたかが
           常に見えるようにするため、押したときだけ残高が動く
-          （docs/spec-changes.md 5）。0件のときは何も出さない。 */}
+          （docs/decisions.md 2.5）。0件のときは何も出さない。 */}
       {data.pendingRecurringCount > 0 && (
         <Section title="未適用の定期入出金">
           <ApplyRecurring
@@ -106,7 +106,7 @@ export function Dashboard({ client }: { client: ApiClient }) {
           </p>
         ) : (
           // hasAverageSurplus が false のとき averageSurplus には 0 が
-          // 入っているが、表示してはいけない（detailed-design 6.1）。
+          // 入っているが、表示してはいけない（docs/architecture.md 7章）。
           <Empty>月次収支がまだ登録されていません。</Empty>
         )}
       </Section>

@@ -69,7 +69,7 @@ describe('トークン未設定のとき', () => {
         screen.getByRole('button', { name: 'ダッシュボード' }),
       ).toBeInTheDocument()
     })
-    // この端末にのみ保存する（docs/design.md 4.5）。
+    // この端末にのみ保存する（docs/decisions.md 1章 #15）。
     expect(localStorage.getItem('asset-wish.token')).toBe('test-token')
   })
 })

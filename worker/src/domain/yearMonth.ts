@@ -18,7 +18,7 @@ function isLeapYear(year: number): boolean {
  *
  * FirstDay() も移植していない。DATE 列との変換専用のメソッドであり、
  * year_month を TEXT 'YYYY-MM' にした時点で変換先が消えた
- *（docs/migration-cloudflare.md 8章）。
+ *（docs/architecture.md 5章）。
  */
 export class YearMonth {
   readonly year: number

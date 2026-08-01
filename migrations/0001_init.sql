@@ -1,5 +1,5 @@
--- 初期スキーマ。docs/design.md 2.2 の DDL を SQLite（D1）に写したもの。
--- Postgres からの差分と、その理由は docs/migration-cloudflare.md 8章にある。
+-- 初期スキーマ。docs/domain.md 4章のエンティティを SQLite（D1）に写したもの。
+-- Postgres からの差分と、その理由は docs/architecture.md 5章にある。
 --
 -- 型の対応:
 --   UUID        -> TEXT       採番は crypto.randomUUID()
@@ -76,7 +76,7 @@ CREATE TABLE monthly_balances (
 -- 取引履歴
 --
 -- ref_id は立替またはウィッシュを指す。参照先が2種類あるため外部キーは張れない
--- （docs/design.md 2.3）。
+-- （docs/architecture.md 5章）。
 CREATE TABLE transactions (
     id          TEXT    PRIMARY KEY,
     account_id  TEXT    NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,

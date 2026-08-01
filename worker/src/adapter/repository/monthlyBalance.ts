@@ -26,7 +26,7 @@ export function toMonthlyBalance(row: MonthlyBalanceRow): MonthlyBalance {
  * 手入力の月次収支を読むだけのリポジトリ。
  *
  * **書き込む文を持たない。** 月次の収支は明細から集計する形に変えたため、
- * この表に新しく書く経路は無い（docs/spec-changes.md 4）。upsert を消して
+ * この表に新しく書く経路は無い（docs/decisions.md 2.4）。upsert を消して
  * あるのは、書ける文が残っていると、同じ月について明細と手入力の2つの真実が
  * できるため。**SQL に無い操作は、上の層がどう間違えても起こせない。**
  *

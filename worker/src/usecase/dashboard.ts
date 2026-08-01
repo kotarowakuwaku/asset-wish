@@ -54,7 +54,7 @@ export type Dashboard = {
    * まだ適用していない定期入出金。
    *
    * 適用は自動では起きない。**背景で勝手に動かない分、何が起きたかが常に
-   * 見える**（docs/spec-changes.md 5）。ここに件数と金額を出し、適用するかを
+   * 見える**（docs/decisions.md 2.5）。ここに件数と金額を出し、適用するかを
    * 画面で尋ねる。
    */
   pendingRecurring: { count: number; total: Money }
@@ -66,7 +66,7 @@ export class DashboardUsecase {
   readonly #loans: LoanRepository
   readonly #wishes: WishRepository
   // 月次の収支は明細から集計する。手入力の月次収支は、明細が1件も無い月を
-  // 埋めるためだけに読む（docs/spec-changes.md 4）。
+  // 埋めるためだけに読む（docs/decisions.md 2.4）。
   readonly #transactions: TransactionRepository
   readonly #balances: MonthlyBalanceRepository
   // 未適用の定期入出金を数えるためだけに読む。ここでは適用しない。

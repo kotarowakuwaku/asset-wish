@@ -85,7 +85,7 @@ function App() {
  * TokenGate はトークンが無いときに入力を求める。
  *
  * 単一ユーザーのため、ログイン画面ではなく固定トークンの入力欄にする
- * （docs/design.md 4.5）。ユーザー管理もパスワードも持たない。
+ * （docs/decisions.md 1章 #15）。ユーザー管理もパスワードも持たない。
  */
 function TokenGate({ onSubmit }: { onSubmit: (token: string) => void }) {
   const [value, setValue] = useState('')

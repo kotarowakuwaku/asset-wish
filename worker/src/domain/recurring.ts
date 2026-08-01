@@ -28,7 +28,7 @@ function validate(name: string, amount: Money, dayOfMonth: number): void {
  * と同じ約束にしてある。向きを別の項目にすると、同じ値の表現が2つになる。
  *
  * 適用は「アプリを開いたときにまとめて」行う。背景で勝手に動かない分、何が
- * 起きたかが常に見える（docs/spec-changes.md 5）。2ヶ月開かなければ、開いた
+ * 起きたかが常に見える（docs/decisions.md 2.5）。2ヶ月開かなければ、開いた
  * 時点で2ヶ月分をまとめて適用する。
  */
 export class RecurringEntry {

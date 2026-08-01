@@ -131,7 +131,7 @@ describe('平均月間余剰', () => {
   })
 
   // hasAverageSurplus が false のとき averageSurplus には 0 が入るが、
-  // 表示してはいけない（detailed-design 6.1）。「余剰0円」と読めてしまう。
+  // 表示してはいけない（docs/architecture.md 7章）。「余剰0円」と読めてしまう。
   it('算出できないときは金額を出さない', async () => {
     render(
       <Dashboard
@@ -288,7 +288,7 @@ describe('ウィッシュ', () => {
   })
 })
 
-// 背景で勝手に適用しない。押したときだけ残高が動く（docs/spec-changes.md 5）。
+// 背景で勝手に適用しない。押したときだけ残高が動く（docs/decisions.md 2.5）。
 describe('未適用の定期入出金', () => {
   it('0件なら何も出さない', async () => {
     render(<Dashboard client={stubClient(base)} />)
