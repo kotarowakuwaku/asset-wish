@@ -10,6 +10,7 @@ import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money, type Money } from '../src/domain/money'
 import { MonthlyBalance } from '../src/domain/monthlyBalance'
 import { parseIsoDate, toInstant, type IsoDate, type Instant } from '../src/domain/time'
+import { Transaction, type TransactionKind } from '../src/domain/transaction'
 import { Wish, type WishStatus } from '../src/domain/wish'
 import { YearMonth } from '../src/domain/yearMonth'
 
@@ -59,6 +60,16 @@ export function wish(amount: number, status: WishStatus): Wish {
     priority: 0,
     deadline: null,
   })
+}
+
+/** 手入力の入出金の明細。金額は符号付きで、出金は負。 */
+export function entry(occurredOn: string, amount: number, note = ''): Transaction {
+  return Transaction.create(id(), id(), yen(amount), 'adjustment', null, isoDateOf(occurredOn), note)
+}
+
+/** 参照先を持つ履歴。手入力ではないので月次の集計には足されない。 */
+export function txn(occurredOn: string, amount: number, kind: TransactionKind): Transaction {
+  return Transaction.create(id(), id(), yen(amount), kind, id(), isoDateOf(occurredOn), '')
 }
 
 export function mb(year: number, month: number, income: number, expense: number): MonthlyBalance {

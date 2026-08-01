@@ -1,7 +1,7 @@
 import { MonthlyBalance } from '../../domain/monthlyBalance'
 import { YearMonth } from '../../domain/yearMonth'
 import type { MonthlyBalanceRepository } from '../../usecase/port'
-import { limitOrAll, SQL_NOW, toMoney } from './d1'
+import { toMoney } from './d1'
 
 const COLUMNS = 'id, year_month, income, expense'
 
@@ -22,6 +22,17 @@ export function toMonthlyBalance(row: MonthlyBalanceRow): MonthlyBalance {
   )
 }
 
+/**
+ * 手入力の月次収支を読むだけのリポジトリ。
+ *
+ * **書き込む文を持たない。** 月次の収支は明細から集計する形に変えたため、
+ * この表に新しく書く経路は無い（docs/spec-changes.md 4）。upsert を消して
+ * あるのは、書ける文が残っていると、同じ月について明細と手入力の2つの真実が
+ * できるため。**SQL に無い操作は、上の層がどう間違えても起こせない。**
+ *
+ * 表そのものを落としていないのは、明細を打ち始める前の月の記録だから。
+ * 明細が1件も無い月に限って、この値が集計に混ざる。
+ */
 export class D1MonthlyBalanceRepository implements MonthlyBalanceRepository {
   readonly #db: D1Database
 
@@ -29,39 +40,10 @@ export class D1MonthlyBalanceRepository implements MonthlyBalanceRepository {
     this.#db = db
   }
 
-  async listRecent(limit: number): Promise<MonthlyBalance[]> {
-    const { results } = await this.#db
-      .prepare(`SELECT ${COLUMNS} FROM monthly_balances ORDER BY year_month DESC LIMIT ?`)
-      .bind(limitOrAll(limit))
-      .all<MonthlyBalanceRow>()
-    return results.map(toMonthlyBalance)
-  }
-
   async listAll(): Promise<MonthlyBalance[]> {
     const { results } = await this.#db
       .prepare(`SELECT ${COLUMNS} FROM monthly_balances ORDER BY year_month DESC`)
       .all<MonthlyBalanceRow>()
     return results.map(toMonthlyBalance)
-  }
-
-  /**
-   * ON CONFLICT により PUT /api/monthly-balances/{yearMonth} が冪等になる。
-   *
-   * id を返すのは、競合したときに渡した id が採用されないため。既存行の id は
-   * そのまま維持されるので、呼び出し側が採番した UUID は捨てられる。それに
-   * 気付かずレスポンスへ載せると、DB に存在しない id を返すことになる。
-   */
-  async upsert(m: MonthlyBalance): Promise<MonthlyBalance> {
-    const row = await this.#db
-      .prepare(
-        `INSERT INTO monthly_balances (${COLUMNS}) VALUES (?, ?, ?, ?)
-         ON CONFLICT (year_month) DO UPDATE
-         SET income = excluded.income, expense = excluded.expense, updated_at = ${SQL_NOW}
-         RETURNING id`,
-      )
-      .bind(m.id, m.yearMonth.toString(), m.income, m.expense)
-      .first<{ id: string }>()
-    if (row === null) throw new Error('月次収支の保存が行を返さなかった')
-    return MonthlyBalance.restore(row.id, m.yearMonth, m.income, m.expense)
   }
 }

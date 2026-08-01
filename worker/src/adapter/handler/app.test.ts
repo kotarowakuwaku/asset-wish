@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { authed, jsonRequest, OTHER_ID, stubDeps, TEST_ID, TEST_TOKEN } from '../../../test/stubs'
+import {
+  aMonthlySummary,
+  authed,
+  jsonRequest,
+  OTHER_ID,
+  stubDeps,
+  TEST_ID,
+  TEST_TOKEN,
+} from '../../../test/stubs'
 import { yen } from '../../../test/support'
 import { domainError } from '../../domain/errors'
 import { ConflictError, NotFoundError } from '../../usecase/port'
@@ -12,8 +20,8 @@ function makeApp(overrides: Partial<Deps> = {}) {
   return { app: createApp(deps), deps }
 }
 
-async function call(path: string, init: RequestInit = authed()) {
-  const res = await createApp(stubDeps()).request(path, init)
+async function call(path: string, init: RequestInit = authed(), overrides: Partial<Deps> = {}) {
+  const res = await createApp(stubDeps(overrides)).request(path, init)
   return { status: res.status, body: await res.json() }
 }
 
@@ -406,41 +414,44 @@ describe('ウィッシュ', () => {
   })
 })
 
-describe('月次収支', () => {
-  it('PUT は 200 を返す', async () => {
-    const { status, body } = await call(
-      '/api/monthly-balances/2026-07',
-      jsonRequest('PUT', { income: 300_000, expense: 230_000 }),
-    )
+describe('月次の集計', () => {
+  it('GET は集計を返す。id は載せない', async () => {
+    const { status, body } = await call('/api/monthly-summaries')
+
     expect(status).toBe(200)
-    expect(body).toEqual({
-      id: TEST_ID,
-      yearMonth: '2026-07',
-      income: 300_000,
-      expense: 230_000,
-      surplus: 70_000,
+    expect(body).toEqual([
+      {
+        yearMonth: '2026-07',
+        income: 300_000,
+        expense: 230_000,
+        surplus: 70_000,
+        source: 'entries',
+      },
+    ])
+  })
+
+  // 明細が1件も無い月は、廃止前に手入力された値で埋まる。どちらを見て
+  // いるか分からないと「明細を打ったのに反映されない」ように見える。
+  it('手入力で埋めた月は source で見分けられる', async () => {
+    const { body } = await call('/api/monthly-summaries', authed(), {
+      summaries: { list: async () => [aMonthlySummary('manual')] },
     })
+    expect((body as { source: string }[])[0].source).toBe('manual')
   })
 
-  // 形式の誤りは組み立て直す話、範囲外は値を見直す話。対処がまるで違う。
-  it('形が違えば 400', async () => {
-    for (const raw of ['2026-7', '202607', 'abc-de']) {
-      const { status, body } = await call(
-        `/api/monthly-balances/${raw}`,
-        jsonRequest('PUT', { income: 1, expense: 1 }),
-      )
-      expect(status).toBe(400)
-      expect((body as { error: { code: string } }).error.code).toBe('INVALID_YEAR_MONTH')
-    }
+  // 手入力の経路は消した。同じ数字を明細と月次の2箇所に入れさせないため。
+  it.each([
+    ['PUT', '/api/monthly-balances/2026-07'],
+    ['POST', '/api/monthly-summaries'],
+    ['PUT', '/api/monthly-summaries/2026-07'],
+  ])('%s %s は 404', async (method, path) => {
+    const { status } = await call(path, jsonRequest(method, { income: 1, expense: 1 }))
+    expect(status).toBe(404)
   })
 
-  it('形は合っていて範囲外なら 422', async () => {
-    const { status, body } = await call(
-      '/api/monthly-balances/2026-13',
-      jsonRequest('PUT', { income: 1, expense: 1 }),
-    )
-    expect(status).toBe(422)
-    expect((body as { error: { code: string } }).error.code).toBe('INVALID_YEAR_MONTH')
+  it('GET /api/monthly-balances も残っていない', async () => {
+    const { status } = await call('/api/monthly-balances')
+    expect(status).toBe(404)
   })
 })
 

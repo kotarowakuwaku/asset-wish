@@ -4,7 +4,7 @@ import type {
   Dashboard,
   Loan,
   LoanDirection,
-  MonthlyBalance,
+  MonthlySummary,
   Transaction,
   Wish,
   WishStatus,
@@ -111,8 +111,6 @@ export function createClient(token: string) {
     request<T>(token, 'POST', path, body ?? {})
   const patch = <T>(path: string, body: unknown) =>
     request<T>(token, 'PATCH', path, body)
-  const put = <T>(path: string, body: unknown) =>
-    request<T>(token, 'PUT', path, body)
   const del = (path: string) => request<void>(token, 'DELETE', path)
 
   return {
@@ -175,11 +173,9 @@ export function createClient(token: string) {
     dropWish: (id: string) => post<Wish>(`/api/wishes/${id}/drop`),
     deleteWish: (id: string) => del(`/api/wishes/${id}`),
 
-    listMonthlyBalances: () => get<MonthlyBalance[]>('/api/monthly-balances'),
-    upsertMonthlyBalance: (
-      yearMonth: string,
-      input: { income: number; expense: number },
-    ) => put<MonthlyBalance>(`/api/monthly-balances/${yearMonth}`, input),
+    // 登録の経路は無い。月次の収支は明細から集計される。同じ数字を明細と
+    // 月次の2箇所に入れさせないため、サーバー側から書き込みの口ごと消した。
+    listMonthlySummaries: () => get<MonthlySummary[]>('/api/monthly-summaries'),
 
     listTransactions: () => get<Transaction[]>('/api/transactions'),
     // 金額は符号付き。出金は負、入金は正。kind は送れない（送ると 400）。

@@ -7,11 +7,10 @@
 import type { Account, AccountKind } from '../../domain/account'
 import type { Loan, LoanDirection } from '../../domain/loan'
 import type { Money } from '../../domain/money'
-import type { MonthlyBalance } from '../../domain/monthlyBalance'
+import type { MonthlySummary } from '../../domain/monthlySummary'
 import type { IsoDate } from '../../domain/time'
 import type { Transaction } from '../../domain/transaction'
 import type { Wish, WishCategory, WishStatus } from '../../domain/wish'
-import type { YearMonth } from '../../domain/yearMonth'
 import type { UpdateAccountInput } from '../../usecase/account'
 import type { Dashboard } from '../../usecase/dashboard'
 import type { Clock } from '../../usecase/port'
@@ -55,9 +54,10 @@ export type WishService = {
   delete(id: string): Promise<void>
 }
 
-export type MonthlyBalanceService = {
-  list(): Promise<MonthlyBalance[]>
-  upsert(yearMonth: YearMonth, income: Money, expense: Money): Promise<MonthlyBalance>
+// 手入力の経路は無い。月次の収支は明細から集計する（docs/spec-changes.md 4）。
+// 同じ数字を明細と月次の2箇所に入れさせないため、書き込みの口ごと消してある。
+export type MonthlySummaryService = {
+  list(): Promise<MonthlySummary[]>
 }
 
 // 明細の登録は口座残高を動かす。金額は符号付きで受ける（出金は負）。
@@ -76,7 +76,7 @@ export type Deps = {
   accounts: AccountService
   loans: LoanService
   wishes: WishService
-  balances: MonthlyBalanceService
+  summaries: MonthlySummaryService
   transactions: TransactionService
   dashboard: DashboardService
   /**

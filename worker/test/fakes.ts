@@ -187,6 +187,10 @@ export class FakeTransactionRepository implements TransactionRepository {
     return this.items.slice(0, limit)
   }
 
+  async listAll(): Promise<Transaction[]> {
+    return [...this.items]
+  }
+
   async get(id: string): Promise<Transaction> {
     const found = this.items.find((t) => t.id === id)
     if (found === undefined) throw new NotFoundError('取引履歴')

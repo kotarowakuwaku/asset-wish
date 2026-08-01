@@ -7,7 +7,7 @@
 
 import { STALE_BALANCE_THRESHOLD_MS, type Account } from '../../domain/account'
 import type { Loan } from '../../domain/loan'
-import type { MonthlyBalance } from '../../domain/monthlyBalance'
+import type { MonthlySummary } from '../../domain/monthlySummary'
 import type { Instant } from '../../domain/time'
 import type { Transaction } from '../../domain/transaction'
 import type { Wish } from '../../domain/wish'
@@ -54,14 +54,22 @@ export function wishResponse(w: Wish) {
   }
 }
 
-export function monthlyBalanceResponse(m: MonthlyBalance) {
+/**
+ * 月次の集計。
+ *
+ * **id を持たない。** 明細から導出した値であって、保存された行ではない。
+ * id を載せると、更新できる資源に見えてしまう。
+ */
+export function monthlySummaryResponse(s: MonthlySummary) {
   return {
-    id: m.id,
-    yearMonth: m.yearMonth.toString(),
-    income: m.income,
-    expense: m.expense,
+    yearMonth: s.yearMonth.toString(),
+    income: s.income,
+    expense: s.expense,
     // 導出値。クライアントは符号で黒字・赤字を判定する。
-    surplus: m.surplus(),
+    surplus: s.surplus(),
+    // 'entries' なら明細の集計、'manual' なら明細が無い月を手入力で埋めたもの。
+    // どちらを見ているか分からないと、「明細を打ったのに反映されない」ように見える。
+    source: s.source,
   }
 }
 

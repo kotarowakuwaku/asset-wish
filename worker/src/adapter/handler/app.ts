@@ -8,13 +8,12 @@ import { Hono } from 'hono'
 import type { AccountKind } from '../../domain/account'
 import type { LoanDirection } from '../../domain/loan'
 import { isWishStatus, type WishCategory } from '../../domain/wish'
-import { YearMonth } from '../../domain/yearMonth'
 import { badRequest, toErrorResponse } from './errors'
 import {
   accountResponse,
   dashboardResponse,
   loanResponse,
-  monthlyBalanceResponse,
+  monthlySummaryResponse,
   transactionResponse,
   wishResponse,
 } from './dto'
@@ -245,35 +244,21 @@ export function createApp(deps: Deps) {
     return c.body(null, 204)
   })
 
-  // ---- 月次収支 ----
-
-  app.get('/api/monthly-balances', async (c) => {
-    const balances = await deps.balances.list()
-    return c.json(balances.map(monthlyBalanceResponse))
-  })
+  // ---- 月次の集計 ----
 
   /**
-   * 月次収支を登録・更新する（冪等）。
+   * 月ごとの収入・支出・余剰を返す。年月の降順。
    *
-   * 経路の {yearMonth} は '2026-07' 形式。形式の誤り（桁数・区切り）は 400、
-   * 範囲外（13月など）は 422 に分ける。前者はクライアントの組み立てミス、
-   * 後者は値の誤り。
+   * **登録の経路は無い。** 明細を打てばその月の収支は自動で出る。手入力の
+   * 経路を残すと、同じ数字を明細と月次の2箇所に入れることになり、どちらが
+   * 正なのかが決まらない（docs/spec-changes.md 4）。
+   *
+   * 明細が1件も無い月に限り、廃止前に手入力された値が `source: "manual"`
+   * として混ざる。
    */
-  app.put('/api/monthly-balances/:yearMonth', async (c) => {
-    const raw = c.req.param('yearMonth')
-    if (!/^\d{4}-\d{2}$/.test(raw)) {
-      throw badRequest('INVALID_YEAR_MONTH', '年月は YYYY-MM 形式で指定してください')
-    }
-    // 形は合っているが値が範囲外。domain のエラーなので 422 になる。
-    const yearMonth = YearMonth.parse(raw)
-
-    const body = await readBody(c, ['income', 'expense'])
-    const m = await deps.balances.upsert(
-      yearMonth,
-      readMoney(body, 'income', 0),
-      readMoney(body, 'expense', 0),
-    )
-    return c.json(monthlyBalanceResponse(m))
+  app.get('/api/monthly-summaries', async (c) => {
+    const summaries = await deps.summaries.list()
+    return c.json(summaries.map(monthlySummaryResponse))
   })
 
   // ---- 取引履歴 ----

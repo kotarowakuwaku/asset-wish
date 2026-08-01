@@ -105,23 +105,28 @@ export interface WishRepository {
   delete(id: string): Promise<void>
 }
 
+/**
+ * 手入力の月次収支。**読み取り専用。**
+ *
+ * 月次の収支は明細から集計する形に変えた（docs/spec-changes.md 4）。この
+ * テーブルに残っているのは、明細を打ち始める前に手で入れた過去の記録だけで、
+ * **新しく書く経路は無い。** upsert を消してあるのは、書ける口が残っていると
+ * 同じ月について明細と手入力の2つの真実ができるため。
+ */
 export interface MonthlyBalanceRepository {
-  /** 年月の降順で最大 limit 件を返す。 */
-  listRecent(limit: number): Promise<MonthlyBalance[]>
   listAll(): Promise<MonthlyBalance[]>
-  /**
-   * 同一年月があれば更新、なければ作成し、保存後の姿を返す。
-   *
-   * 戻り値があるのは ID のため。既存行を更新した場合、DB は既存の ID を
-   * 維持するので、呼び出し側が採番した ID は使われない。返さないと
-   * 存在しない ID をレスポンスに載せることになる。
-   */
-  upsert(m: MonthlyBalance): Promise<MonthlyBalance>
 }
 
 export interface TransactionRepository {
   /** 発生日の降順で最大 limit 件を返す。 */
   list(limit: number): Promise<Transaction[]>
+  /**
+   * 全件を発生日の降順で返す。月次の集計に使う。
+   *
+   * 集計を SQL に書かないため（不変条件8）、domain の純粋関数に渡す材料を
+   * ここで全部取る。データ規模は年間数百件。
+   */
+  listAll(): Promise<Transaction[]>
   /** 見つからなければ NotFoundError。 */
   get(id: string): Promise<Transaction>
 }

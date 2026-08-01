@@ -18,9 +18,12 @@
 
 > **仕様変更について（2026-07-30）：** **貸し借りを実質資産の計算から外した。** 実質資産は `現金・預金 − 確定支出` になり、未精算の貸し借りは投資資産と同じ別枠の参考値になった。貸し借りの登録・精算で口座残高は動かず、取引履歴も残らない。**この文書のうち 3.5 の計算式、4.4 のダッシュボード応答、4.4 の `/api/loans` の入力、6.1 のテストケース表が影響を受ける**（該当箇所に注記を入れてある）。経緯と理由は `docs/spec-changes.md` の2章。
 
-> **仕様変更について（2026-08-01）：** **入出金の明細を1件ずつ打てるようにした。** 明細を打つと口座残高が動き、削除すると戻る。分類（カテゴリ）は持たない。`transactions.note` の追加と、`POST` / `DELETE /api/transactions` が該当する。経緯と理由は `docs/spec-changes.md` の3章。
+> **仕様変更について（2026-08-01）：** 2件ある。経緯と理由は `docs/spec-changes.md` の3章・4章。
 >
-> **要件定義書は v1.2 が正。**
+> 1. **入出金の明細を1件ずつ打てるようにした。** 明細を打つと口座残高が動き、削除すると戻る。分類（カテゴリ）は持たない。`transactions.note` の追加と、`POST` / `DELETE /api/transactions` が該当する。
+> 2. **月次収支の手入力をやめ、明細から集計する形にした。** `PUT /api/monthly-balances/{yearMonth}` は廃止し、`GET /api/monthly-summaries` に置き換わった。`monthly_balances` の表は残っているが**読み取り専用**で、明細が1件も無い月を埋めるためだけに使う。**平均月間余剰から当月を除くようにした**（3.5 の計算式が影響を受ける）。
+>
+> **要件定義書は v1.3 が正。**
 
 ---
 
@@ -415,6 +418,11 @@ func CalculateShortfall(wish Wish, netAsset Money) Money
 
 // 直近 n ヶ月の平均月間余剰。データが n 未満なら存在する分だけで平均する。
 // データが 0 件なら ok=false。
+//
+// 2026-08-01 の変更：材料が MonthlyBalance（手入力）から MonthlySummary
+//（明細の集計）になり、**当月を除く**ようになった。当月は終わっていない
+// ため、混ぜると月初に余剰が実態より小さく見える。現在のシグネチャは
+// averageSurplus(figures, count, current) で worker/src/domain/netAsset.ts にある。
 func AverageSurplus(balances []MonthlyBalance, months int) (Money, bool)
 
 // 到達見込み月数。切り上げ除算。
@@ -465,8 +473,7 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 | POST | `/api/wishes/{id}/pay` | 確定 → 完了 |
 | POST | `/api/wishes/{id}/drop` | → 見送り |
 | DELETE | `/api/wishes/{id}` | ウィッシュ削除 |
-| GET | `/api/monthly-balances` | 月次収支一覧（降順） |
-| PUT | `/api/monthly-balances/{yearMonth}` | 月次収支の登録・更新（冪等） |
+| GET | `/api/monthly-summaries` | 月次の集計（降順。明細から導出） |
 | GET | `/api/transactions` | 取引履歴 |
 | POST | `/api/transactions` | 入出金の明細を打つ（口座残高が動く） |
 | DELETE | `/api/transactions/{id}` | 明細の削除（残高を戻す。手入力のもののみ） |
@@ -556,13 +563,27 @@ func MonthsToReach(shortfall, avgSurplus Money) (int, bool) {
 
 打ち消しの明細を足す方式（赤伝）は採らない。打ち間違いが一覧に残り続け、1件の誤りが2行に増えるため。二重に戻る心配は要らない。残高の楽観ロックが効き、2度目は 409 になる。
 
-**`PUT /api/monthly-balances/{yearMonth}`**
-
-`yearMonth` は `2026-07` 形式。同じ月への再送信は上書きとなる（冪等）。
+**`GET /api/monthly-summaries`**
 
 ```json
-{ "income": 320000, "expense": 255000 }
+[
+  {
+    "yearMonth": "2026-07",
+    "income": 300000,
+    "expense": 230000,
+    "surplus": 70000,
+    "source": "entries"
+  }
+]
 ```
+
+入出金の明細を月ごとに足し上げた結果。**`id` を持たない。** 保存された行ではなく導出値なので、`id` を載せると更新できる資源に見える（不変条件12）。
+
+**登録・更新の経路は無い。** 明細を打てばその月の収支は自動で出る。手入力の口を残すと、同じ数字を明細と月次の2箇所に入れることになり、どちらが正なのかが決まらない。`monthly_balances` への `PUT` は廃止した（2026-08-01）。
+
+`source` は `'entries'`（明細の集計）か `'manual'`（明細が1件も無い月を、廃止前に手入力された値で埋めたもの）。どちらを見ているかが画面から読めないと、「明細を打ったのに反映されない」ように見える。
+
+**足すのは手入力の明細（`adjustment`）だけ。** ウィッシュの支払いと過去の貸し借りの履歴は除く。ライブ代のような臨時支出を月の余剰に混ぜると、何か買うたびに他の目標の到達見込みが悪化する（不変条件2の考え方）。
 
 ### 4.4 エラーレスポンス
 
