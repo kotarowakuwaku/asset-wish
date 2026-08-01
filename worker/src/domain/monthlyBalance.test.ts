@@ -7,22 +7,16 @@ describe('MonthlyBalance', () => {
   it('月間余剰は income - expense', () => {
     const m = mb(2026, 7, 300_000, 230_000)
     expect(m.surplus()).toBe(70_000)
-    expect(m.isSurplus()).toBe(true)
-    expect(m.isDeficit()).toBe(false)
   })
 
   it('支出が上回れば赤字', () => {
     const m = mb(2026, 7, 200_000, 250_000)
     expect(m.surplus()).toBe(-50_000)
-    expect(m.isSurplus()).toBe(false)
-    expect(m.isDeficit()).toBe(true)
   })
 
-  it('収支が同額なら余剰でも赤字でもない', () => {
-    const m = mb(2026, 7, 250_000, 250_000)
-    expect(m.surplus()).toBe(0)
-    expect(m.isSurplus()).toBe(false)
-    expect(m.isDeficit()).toBe(false)
+  // 0 は黒字でも赤字でもない。画面は符号をそのまま見る。
+  it('収支が同額なら余剰は0', () => {
+    expect(mb(2026, 7, 250_000, 250_000).surplus()).toBe(0)
   })
 
   it('収入が負なら作れない', () => {

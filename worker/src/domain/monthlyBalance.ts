@@ -1,5 +1,5 @@
 import { domainError } from './errors'
-import { isNegativeMoney, isPositiveMoney, subMoney, type Money } from './money'
+import { isNegativeMoney, subMoney, type Money } from './money'
 import type { YearMonth } from './yearMonth'
 
 /**
@@ -41,13 +41,5 @@ export class MonthlyBalance {
   /** 月間余剰。負値なら赤字。 */
   surplus(): Money {
     return subMoney(this.income, this.expense)
-  }
-
-  isSurplus(): boolean {
-    return isPositiveMoney(this.surplus())
-  }
-
-  isDeficit(): boolean {
-    return isNegativeMoney(this.surplus())
   }
 }

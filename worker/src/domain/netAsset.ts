@@ -1,11 +1,16 @@
 import type { Account } from './account'
 import type { Loan } from './loan'
-import { addMoney, isPositiveMoney, subMoney, ZERO_MONEY, type Money } from './money'
+import { addMoney, subMoney, ZERO_MONEY, type Money } from './money'
 import type { Wish } from './wish'
-import type { YearMonth } from './yearMonth'
 
-/** 平均月間余剰の算出に用いる遡及月数。 */
-export const AVERAGE_SURPLUS_MONTHS = 3
+// 実質資産と、**実質資産の外に置く参考値**（投資・貸借）を出す。
+//
+// 参考値をここに同居させているのは、「実質資産に足すか足さないか」が
+// 対で読めるようにするため。**足さないものを足さないと決めているのも
+// 実質資産の定義の一部**（不変条件1・4）。
+//
+// ウィッシュの到達（不足額・何ヶ月）は wishProgress.ts、月次の平均は
+// monthlySummary.ts。名前と中身をずらさない。
 
 /**
  * 実質資産の内訳。
@@ -102,98 +107,4 @@ export function calculateOutstandingLoans(loans: readonly Loan[]): OutstandingLo
   }
 
   return { lent, borrowed }
-}
-
-/**
- * 不足額を返す。負値ならすでに達成可能。
- * ウィッシュごとに独立して算出する。複数ウィッシュの合計とは比較しない。
- */
-export function calculateShortfall(wish: Wish, currentNetAsset: Money): Money {
-  return subMoney(wish.amount, currentNetAsset)
-}
-
-/**
- * 月間余剰を持つもの。月次の集計（MonthlySummary）と、手入力の月次収支
- * （MonthlyBalance）の両方がこの形を満たす。
- */
-export type MonthlyFigures = {
-  yearMonth: YearMonth
-  surplus(): Money
-}
-
-/**
- * 直近 count ヶ月の月間余剰の平均を返す。対象が 0 件なら null。
- *
- * **当月は含めない。** まだ終わっていない月を混ぜると、余剰が実態より
- * 小さく見える。月初なら家賃だけ引かれて給料がまだ、という状態になり、
- * 月の前半だけ到達見込みが悪化する。
- *
- * figures は年月の昇降順を問わない。内部でコピーして降順に整列するため、
- * 引数の配列は変更しない。件数が count 未満なら存在する分だけで平均する。
- * 平均は0方向への切り捨て。
- *
- * null は「算出不可」であって 0 ではない。0 として扱うと「余剰なし」に見える。
- */
-export function averageSurplus(
-  figures: readonly MonthlyFigures[],
-  count: number,
-  current: YearMonth,
-): Money | null {
-  if (count <= 0) return null
-
-  const completed = figures.filter((f) => f.yearMonth.before(current))
-  if (completed.length === 0) return null
-
-  const sorted = [...completed].sort((a, b) => b.yearMonth.compare(a.yearMonth)) // 降順
-  const n = Math.min(count, sorted.length)
-
-  let sum = ZERO_MONEY
-  for (const m of sorted.slice(0, n)) {
-    sum = addMoney(sum, m.surplus())
-  }
-  return Math.trunc(sum / n) as Money
-}
-
-/**
- * 目標到達までの月数を返す。切り上げ。
- *
- *   shortfall  <= 0 → null（すでに達成可能）
- *   avgSurplus <= 0 → null（積み上がらないため到達しない）
- *
- * null は「算出不可」。0 として出すと「今月中に届く」と読める。
- *
- * Go 版は整数の切り上げ除算 (a + b - 1) / b だった。JavaScript の除算は必ず
- * 浮動小数点を経由するため同じ式は再現できない。Money は安全整数の範囲に
- * 収まる円額であり（不変条件11）、この規模では ceil の結果は整数除算と一致する。
- */
-export function monthsToReach(shortfall: Money, avgSurplus: Money): number | null {
-  if (!isPositiveMoney(shortfall) || !isPositiveMoney(avgSurplus)) return null
-  return Math.ceil(shortfall / avgSurplus)
-}
-
-/**
- * 期限までに毎月いくら貯めればよいかを返す。
- *
- * `monthsToReach`（この余剰なら何ヶ月かかるか）とちょうど逆向きの計算で、
- * 「いつまでに欲しいか」が決まっているウィッシュに対して使う。
- *
- *   shortfall <= 0 → null（すでに達成可能）
- *   deadline が無い → null（期限が無ければ「毎月いくら」も決まらない）
- *   期限が過ぎている → null（間に合わない。0 を返すと達成済みに見える）
- *
- * 期限が当月なら残り1ヶ月として扱う。**今月中に全額、という意味になる。**
- * 0ヶ月で割ると無限大になるうえ、「今月が期限」は「今月払う」であって
- * 「もう間に合わない」ではない。
- */
-export function monthlySavingNeeded(
-  shortfall: Money,
-  deadline: YearMonth | null,
-  current: YearMonth,
-): Money | null {
-  if (!isPositiveMoney(shortfall) || deadline === null) return null
-
-  const remaining = current.monthsUntil(deadline)
-  if (remaining < 0) return null
-
-  return Math.ceil(shortfall / (remaining + 1)) as Money
 }

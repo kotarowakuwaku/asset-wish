@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { errorMessage, type ApiClient } from '../api/client'
 import type { RecurringEntry } from '../api/types'
 import { useAsync } from '../app/useAsync'
+import { useSubmit } from '../app/useSubmit'
 import {
   Badge,
   Empty,
@@ -13,7 +14,7 @@ import {
   Section,
 } from '../components/common'
 import { parseAmount } from '../lib/format'
-import { AccountSelect } from './AccountSelect'
+import { AccountSelect } from '../components/AccountSelect'
 
 /** 入金か出金か。画面の中だけの区別で、サーバーへは金額の符号として送る。 */
 type Direction = 'out' | 'in'
@@ -119,24 +120,11 @@ function DeleteRecurringButton({
   entry: RecurringEntry
   onDeleted: () => void
 }) {
-  const [message, setMessage] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const remove = async () => {
-    setBusy(true)
-    try {
-      await client.deleteRecurringEntry(entry.id)
-      onDeleted()
-    } catch (e) {
-      setMessage(errorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { busy, message, submit } = useSubmit(() => client.deleteRecurringEntry(entry.id), onDeleted)
 
   return (
     <>
-      <button type="button" onClick={remove} disabled={busy}>
+      <button type="button" onClick={submit} disabled={busy}>
         削除
       </button>
       <FormError message={message} />

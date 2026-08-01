@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { errorMessage, type ApiClient } from '../api/client'
 import type { Loan, LoanDirection } from '../api/types'
 import { useAsync } from '../app/useAsync'
+import { useSubmit } from '../app/useSubmit'
 import {
   Badge,
   Empty,
@@ -170,24 +171,11 @@ function DeleteLoanButton({
   loan: Loan
   onDeleted: () => void
 }) {
-  const [message, setMessage] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const remove = async () => {
-    setBusy(true)
-    try {
-      await client.deleteLoan(loan.id)
-      onDeleted()
-    } catch (e) {
-      setMessage(errorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { busy, message, submit } = useSubmit(() => client.deleteLoan(loan.id), onDeleted)
 
   return (
     <>
-      <button type="button" onClick={remove} disabled={busy}>
+      <button type="button" onClick={submit} disabled={busy}>
         削除
       </button>
       <FormError message={message} />

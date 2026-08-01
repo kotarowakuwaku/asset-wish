@@ -37,6 +37,30 @@ Cloudflare Worker
 
 ## 2. レイヤと依存の向き
 
+**クリーンアーキテクチャ（オニオン）を、ポートとアダプタの形で実装している。**
+
+| このリポジトリ | クリーンアーキテクチャ |
+| --- | --- |
+| `domain/` | Entities |
+| `usecase/` | Use Cases + **ポートの定義** |
+| `adapter/handler`, `adapter/repository` | Interface Adapters |
+| `infra/`, `index.ts` | Frameworks & Drivers |
+
+**ポートとアダプタである点が現れているのが `usecase/port.ts`。** リポジトリのインターフェースを**内側（usecase）が定義し、外側（adapter/repository）が実装する**。これが依存性逆転で、だから `domain` と `usecase` は D1 を知らずにテストできる。不変条件5・9は、この構造を機械的に守るための言い換え。
+
+戦術的 DDD の語彙も使う——エンティティ（`Account` / `Loan` / `Wish` …）、値オブジェクト（`Money` / `YearMonth` / `IsoDate`）、ドメインサービス（`netAsset.ts` などの純粋関数）、リポジトリ。
+
+**意図的に採っていないもの：**
+
+| 一般的な要素 | ここでの扱い | 理由 |
+| --- | --- | --- |
+| DI コンテナ | 使わない。`index.ts` に手書き | 結線が1箇所に見えるほうが学習目的に合う |
+| 集約ルートの明示 | 無い | エンティティ間の参照が浅く、境界を宣言する必要が出ていない |
+| ドメインイベント | 無い | 単一ユーザーで、非同期の波及が無い |
+| CQRS | 無い | 読みと書きが同じモデルで足りる |
+| ORM / Unit of Work | `AtomicWriter` が代替 | **D1 に `BEGIN` が無い**（3章） |
+
+
 ```
 handler ──▶ usecase ──▶ domain
    │           │
@@ -52,6 +76,22 @@ handler ──▶ usecase ──▶ domain
 | `adapter/handler` | `worker/src/adapter/handler/` | JSON の変換、エラーのステータスコードへの対応づけ | 業務判断 |
 | `adapter/repository` | `worker/src/adapter/repository/` | D1 アクセス、行型とドメイン型の相互変換 | 計算・集計 |
 | `infra` | `worker/src/infra/` | 設定の読み出しと検証 | |
+
+### ファイルの置き場
+
+**名前と中身をずらさない。** `netAsset.ts` に貸借の集計が入っていると、開いた人が「実質資産の一部か」と読む。
+
+| 置き場 | 入れるもの |
+| --- | --- |
+| `domain/` の値オブジェクト | `money` / `yearMonth` / `time`。他の domain に依存しない |
+| `domain/` の集約 | `account` / `loan` / `wish` / `transaction` / `recurring` / `monthlyBalance` |
+| `domain/` のサービス | `netAsset`（実質資産と参考値）/ `wishProgress`（不足額と到達）/ `monthlySummary`（月次の集計と平均） |
+| `front/screens/` | **router が切り替える単位だけ。** 部品を置かない |
+| `front/components/` | 複数の画面から使う部品（`AccountSelect` など） |
+| `front/app/` | 画面に依らない基盤（`router` / `token` / `useAsync` / `useSubmit`） |
+| `front/lib/` | 純粋関数（表示整形） |
+
+`domain/` はフラットに保つ。12ファイル程度なら階層を切る利得より、import パスが短い利得のほうが大きい。
 
 ### 機械的に守られているもの
 
@@ -204,6 +244,7 @@ D1 は `BEGIN TRANSACTION` を受け付けない。代わりに `db.batch()` が
 | 通信の置き場 | `src/api/client.ts` に集約。画面から `fetch` を直に呼ばない | 認証・エラー変換・基底 URL が散ると、直すときに全画面を触る |
 | 基底 URL | 空文字（同一オリジン） | **絶対 URL に戻すと CORS が復活する。戻さないこと** |
 | E2E の API | Playwright の `page.route` で差し替え、サーバーも DB も起動しない | 見たいのは画面の配線。サーバーの正しさは worker 側が持つ |
+| 書き込みの状態 | `useSubmit`（`useAsync` と対） | 実行中フラグ・エラー文言・`finally` を1箇所に。書き忘れた画面はボタンが戻らなくなるが、症状から原因が読めない |
 
 **front で金額の計算をしない**（不変条件8）。サーバーが算出済みの値を並べるだけ。`src/lib/format.ts` に置いてよいのは表示整形だけ。
 

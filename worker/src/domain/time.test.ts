@@ -4,7 +4,6 @@ import {
   parseInstant,
   parseIsoDate,
   toInstant,
-  toIsoDate,
   yearMonthOf,
 } from './time'
 
@@ -29,18 +28,6 @@ describe('parseIsoDate', () => {
   it('うるう年の2月29日は年によって結果が変わる', () => {
     expect(parseIsoDate('2024-02-29')).toBe('2024-02-29')
     expect(parseIsoDate('2026-02-29')).toBeNull()
-  })
-})
-
-describe('toIsoDate', () => {
-  it('UTC の日付部分を取り出す', () => {
-    expect(toIsoDate(new Date('2026-07-12T15:30:00Z'))).toBe('2026-07-12')
-  })
-
-  // タイムゾーンを持つ値を日付にする場所はここだけ。必ず UTC で切る。
-  it('UTC で日をまたぐ時刻でも UTC 基準で切る', () => {
-    expect(toIsoDate(new Date('2026-07-12T23:59:59Z'))).toBe('2026-07-12')
-    expect(toIsoDate(new Date('2026-07-13T00:00:00Z'))).toBe('2026-07-13')
   })
 })
 

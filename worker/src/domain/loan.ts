@@ -118,6 +118,12 @@ export class Loan {
     return subMoney(this.amount, this.#settledAmount)
   }
 
+  /**
+   * 全額精算済みか。「未精算のみ」の絞り込みに使う。
+   *
+   * `status() === 'settled'` でも同じだが、絞り込みの意味を状態の表現に
+   * 依存させないため、専用の述語を置いている。
+   */
   isFullySettled(): boolean {
     return isZeroMoney(this.outstanding())
   }
