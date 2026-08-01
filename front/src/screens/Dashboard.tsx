@@ -35,37 +35,24 @@ export function Dashboard({ client }: { client: ApiClient }) {
 
   return (
     <>
-      {/* **口座の残高を3つの時点で並べる。**
-
-          「今ある額」を主役にしているのは、確定した支出を引いた額だけを
-          出していると「結局いまいくら持っているのか」が読めないため。
-          引き算をやめるのではなく、引く前と引いた後の両方を出す。
-
-          貸し借りと投資はどの時点にも足さないので、この dl には入れない。 */}
       <section className="section net-asset">
-        <h2>今ある額</h2>
+        <h2>実質資産</h2>
         <p className="net-asset-value">
-          <Money amount={data.breakdown.cashTotal} />
+          <Money amount={data.netAsset} />
         </p>
+        {/* 内訳に並ぶのは実質資産を構成する項目だけ。貸し借りと投資は
+            実質資産の外の参考値なので、この dl には入れない。 */}
         <dl className="breakdown">
           <div>
-            <dt>支払い後に残る額</dt>
+            <dt>現金・預金</dt>
             <dd>
-              <Money amount={data.netAsset} />
+              <Money amount={data.breakdown.cashTotal} />
             </dd>
           </div>
           <div>
             <dt>確定した支出</dt>
             <dd>
               −<Money amount={data.breakdown.commitments} />
-            </dd>
-          </div>
-          {/* 定期入出金を反映した翌月1日の見込み。確定した支出は含めない
-              （いつ払うかが決まっていないため）。 */}
-          <div>
-            <dt>来月初めの見込み</dt>
-            <dd>
-              <Money amount={data.projectedBalance} />
             </dd>
           </div>
         </dl>

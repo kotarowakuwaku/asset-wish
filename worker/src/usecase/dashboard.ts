@@ -4,7 +4,6 @@ import {
   calculateInvestmentTotal,
   calculateOutstandingLoans,
   netAsset,
-  projectedBalance,
   type NetAssetBreakdown,
   type OutstandingLoans,
 } from '../domain/netAsset'
@@ -53,13 +52,6 @@ export type Dashboard = {
    * breakdown ではなくここに置いてあるのは、合計に足されない値だから。
    */
   outstanding: OutstandingLoans
-  /**
-   * 来月初めの見込み残高。
-   *
-   * 今ある額に、翌月1日までに適用日が来る定期入出金を足し引きしたもの。
-   * **確定した支出は含めない**（いつ払うかが決まっていないため）。
-   */
-  projectedBalance: Money
   /** データが無ければ null（算出不可）。 */
   averageSurplus: Money | null
   /**
@@ -156,12 +148,6 @@ export class DashboardUsecase {
     return {
       breakdown,
       netAsset: total,
-      // 「今いくらあるか」だけでは月末に向けてどうなるかが読めない。
-      projectedBalance: projectedBalance(
-        breakdown.cashTotal,
-        recurring,
-        currentMonth.addMonths(1).firstDay(),
-      ),
       investmentTotal: calculateInvestmentTotal(accounts),
       outstanding: calculateOutstandingLoans(loans),
       averageSurplus: avgSurplus,

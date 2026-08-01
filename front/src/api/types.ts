@@ -133,13 +133,6 @@ export type Dashboard = {
     cashTotal: number
     commitments: number
   }
-  /**
-   * 来月初めの見込み残高。今ある額（breakdown.cashTotal）に、翌月1日までに
-   * 適用日が来る定期入出金を足し引きしたもの。
-   *
-   * **確定した支出は含めない。** いつ払うかが決まっていないため。
-   */
-  projectedBalance: number
   /** 投資は実質資産に含めない別枠の参考値。 */
   investmentTotal: number
   /**

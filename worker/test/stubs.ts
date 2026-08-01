@@ -93,7 +93,6 @@ export function aDashboard(): Dashboard {
   return {
     breakdown: { cashTotal: yen(910_000), commitments: yen(80_000) },
     netAsset: yen(830_000),
-    projectedBalance: yen(1_000_000),
     investmentTotal: yen(350_000),
     outstanding: { lent: yen(12_000), borrowed: yen(5_000) },
     averageSurplus: yen(60_000),

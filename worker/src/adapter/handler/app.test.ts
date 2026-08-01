@@ -68,7 +68,6 @@ describe('GET /api/dashboard', () => {
     expect(status).toBe(200)
     expect(body).toEqual({
       netAsset: 830_000,
-      projectedBalance: 1_000_000,
       breakdown: { cashTotal: 910_000, commitments: 80_000 },
       investmentTotal: 350_000,
       outstandingLent: 12_000,
@@ -103,7 +102,6 @@ describe('GET /api/dashboard', () => {
         get: async () => ({
           breakdown: { cashTotal: yen(0), commitments: yen(0) },
           netAsset: yen(0),
-          projectedBalance: yen(0),
           investmentTotal: yen(0),
           outstanding: { lent: yen(0), borrowed: yen(0) },
           averageSurplus: null,

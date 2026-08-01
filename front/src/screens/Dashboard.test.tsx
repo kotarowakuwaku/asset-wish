@@ -27,25 +27,20 @@ const base: DashboardData = {
   outstandingBorrowed: 5000,
   averageSurplus: 65000,
   hasAverageSurplus: true,
-  projectedBalance: 1080000,
   pendingRecurringCount: 0,
   pendingRecurringTotal: 0,
   wishes: [],
 }
 
-describe('残高の3つの時点', () => {
-  // 「今ある額」を主役にする。確定した支出を引いた額だけを出していると
-  // 「結局いまいくら持っているのか」が読めない。
-  it('今ある額・支払い後に残る額・来月初めの見込みを並べる', async () => {
+describe('実質資産', () => {
+  it('内訳とあわせて表示する', async () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: '今ある額' })).toBeInTheDocument()
+      expect(screen.getByText('¥830,000')).toBeInTheDocument()
     })
-    expect(screen.getByText('¥910,000')).toBeInTheDocument() // 今ある額
-    expect(screen.getByText('¥830,000')).toBeInTheDocument() // 支払い後に残る額
-    expect(screen.getByText('¥1,080,000')).toBeInTheDocument() // 来月初めの見込み
-    expect(screen.getByText('¥80,000')).toBeInTheDocument() // 確定した支出
+    expect(screen.getByText('¥910,000')).toBeInTheDocument()
+    expect(screen.getByText('¥80,000')).toBeInTheDocument()
   })
 
   // 投資は実質資産に含めないため（不変条件1）、そもそも見たい値ではなかった。
@@ -62,7 +57,7 @@ describe('残高の3つの時点', () => {
 
   // 貸し借りは実質資産の内訳ではない（不変条件4）。実質資産の内訳の dl に
   // 混ぜると「合計に足されている」と読める。
-  it('未精算の貸し借りは残高の内訳ではなく別枠に出す', async () => {
+  it('未精算の貸し借りは実質資産の内訳ではなく別枠に出す', async () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
@@ -73,13 +68,12 @@ describe('残高の3つの時点', () => {
       screen.getByRole('heading', { name: '未精算の貸し借り' }),
     ).toBeInTheDocument()
 
-    // 残高の内訳に並ぶのは3つの時点と確定した支出だけ。貸し借りの2行は
-    // そのあとの別セクションに出る（不変条件4）。
+    // 実質資産の内訳に並ぶのは現金・預金と確定した支出だけ。貸し借りの
+    // 2行はそのあとの別セクションに出る。
     const terms = screen.getAllByRole('term').map((t) => t.textContent)
     expect(terms).toEqual([
-      '支払い後に残る額',
+      '現金・預金',
       '確定した支出',
-      '来月初めの見込み',
       '貸している',
       '借りている',
     ])
@@ -300,7 +294,7 @@ describe('未適用の定期入出金', () => {
     render(<Dashboard client={stubClient(base)} />)
 
     await waitFor(() => {
-      expect(screen.getByText('今ある額')).toBeInTheDocument()
+      expect(screen.getByText('実質資産')).toBeInTheDocument()
     })
     expect(screen.queryByText('未適用の定期入出金')).not.toBeInTheDocument()
   })

@@ -38,7 +38,6 @@ type DashboardBody = {
   breakdown: { cashTotal: number; commitments: number }
   averageSurplus: number
   hasAverageSurplus: boolean
-  projectedBalance: number
   pendingRecurringCount: number
   pendingRecurringTotal: number
   wishes: { id: string; shortfall: number; monthsToReach: number | null }[]
@@ -700,57 +699,6 @@ describe('定期入出金', () => {
     expect(body.pendingRecurringTotal).toBe(250_000 * body.pendingRecurringCount)
     // 数えるだけで、残高は動かさない。
     expect(await balanceOf(account.id)).toBe(500_000)
-  })
-})
-
-// 「今いくらあるか」だけでは月末に向けてどうなるかが読めない、という
-// 要望への回答。3つの時点を並べて出す。
-describe('残高の3つの時点', () => {
-  it('今ある額・支払い後に残る額・来月初めの見込みを返す', async () => {
-    const account = await createAccount(500_000)
-    // 確定したウィッシュは「支払い後に残る額」だけを動かす。
-    const wish = await req<WishBody>(
-      '/api/wishes',
-      jsonRequest('POST', { title: 'テスト', amount: 80_000, category: 'item' }),
-    )
-    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
-    // 定期は「来月初めの見込み」だけを動かす。適用日を1日にすると、
-    // **未適用の当月分と翌月分の2回**が翌月1日までに来る（登録した月の
-    // 前月まで適用済みとして始まるため）。実行時期には依存しない。
-    await req(
-      '/api/recurring-entries',
-      jsonRequest('POST', { name: '給料', accountId: account.id, amount: 250_000, dayOfMonth: 1 }),
-    )
-
-    const { body } = await req<DashboardBody>('/api/dashboard')
-
-    expect(body.breakdown.cashTotal).toBe(500_000)
-    expect(body.netAsset).toBe(420_000)
-    expect(body.projectedBalance).toBe(1_000_000)
-  })
-
-  // 確定支出を見込みに含めない。いつ払うかが決まっていないため、含めると
-  // 「まだ払っていないのに減っている」が別の形で再発する。
-  it('確定した支出は見込みに含めない', async () => {
-    await createAccount(500_000)
-    const wish = await req<WishBody>(
-      '/api/wishes',
-      jsonRequest('POST', { title: 'テスト', amount: 80_000, category: 'item' }),
-    )
-    await req(`/api/wishes/${wish.body.id}/commit`, authed({ method: 'POST' }))
-
-    const { body } = await req<DashboardBody>('/api/dashboard')
-
-    expect(body.netAsset).toBe(420_000)
-    expect(body.projectedBalance).toBe(500_000)
-  })
-
-  it('定期が無ければ見込みは今ある額と同じ', async () => {
-    await createAccount(500_000)
-
-    const { body } = await req<DashboardBody>('/api/dashboard')
-
-    expect(body.projectedBalance).toBe(500_000)
   })
 })
 
