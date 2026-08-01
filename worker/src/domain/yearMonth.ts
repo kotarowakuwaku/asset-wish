@@ -4,6 +4,12 @@ const MIN_YEAR = 1900
 const MAX_YEAR = 9999
 const YEAR_MONTH_PATTERN = /^\d{4}-\d{2}$/
 
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
 /**
  * 年月。日・時刻・タイムゾーンを持たない。
  *
@@ -67,6 +73,18 @@ export class YearMonth {
    */
   monthsUntil(other: YearMonth): number {
     return (other.year - this.year) * 12 + (other.month - this.month)
+  }
+
+  /**
+   * その月の日数を返す。
+   *
+   * `Date` を使わずに求めているのは、domain に時刻とタイムゾーンを持ち込まない
+   * ため。`new Date(year, month, 0)` は動作環境のタイムゾーンで解釈され、
+   * 月末の判定が環境によってずれる余地が残る。
+   */
+  daysInMonth(): number {
+    if (this.month === 2) return isLeapYear(this.year) ? 29 : 28
+    return DAYS_IN_MONTH[this.month - 1]
   }
 
   /** this < other なら負、等しければ 0、this > other なら正。並べ替えに使う。 */

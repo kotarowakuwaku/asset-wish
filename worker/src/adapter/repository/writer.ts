@@ -1,6 +1,7 @@
 import { ConflictError, type AtomicWriter, type WriteOperation } from '../../usecase/port'
 import { updateAccountStatement } from './account'
 import { insertLoanStatement, updateLoanSettledStatement } from './loan'
+import { updateRecurringAppliedStatement } from './recurring'
 import { deleteTransactionStatement, insertTransactionStatement } from './transaction'
 import { updateWishStatusStatement } from './wish'
 
@@ -68,6 +69,8 @@ export class D1AtomicWriter implements AtomicWriter {
         return insertTransactionStatement(this.#db, op.transaction, guarded)
       case 'deleteTransaction':
         return deleteTransactionStatement(this.#db, op.transaction, guarded)
+      case 'updateRecurringApplied':
+        return updateRecurringAppliedStatement(this.#db, op.entry, guarded)
     }
   }
 }
@@ -100,6 +103,17 @@ function preconditionOf(op: WriteOperation): Precondition[] {
       ]
     case 'updateWishStatus':
       return [{ table: 'wishes', column: 'status', id: op.wish.id, value: op.expectedStatus }]
+    // 読み取り時点の適用済み年月が変わっていないこと。2つのタブから同時に
+    // 適用しても、2度目は競合として弾かれ、残高が二重に動かない。
+    case 'updateRecurringApplied':
+      return [
+        {
+          table: 'recurring_entries',
+          column: 'applied_through',
+          id: op.entry.id,
+          value: op.expectedAppliedThrough,
+        },
+      ]
     // 履歴の作成・削除は前提条件を持たない。どちらも口座残高の増減と同じ
     // batch に載り、その残高が番人になる。履歴側にも条件を足すと、番人が
     // 2箇所に分かれて「どちらが先に見たか」を考える羽目になる。

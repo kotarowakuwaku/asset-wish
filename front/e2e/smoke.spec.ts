@@ -42,6 +42,8 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
         outstandingBorrowed: 5000,
         averageSurplus: 65000,
         hasAverageSurplus: true,
+        pendingRecurringCount: 0,
+        pendingRecurringTotal: 0,
         wishes: wishes.map((w) => ({
           ...w,
           shortfall: 358000,
@@ -68,6 +70,7 @@ async function setupApi(page: Page, initialWishes: Wish[] = []) {
   )
 
   await page.route('**/api/loans*', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/recurring-entries*', (route) => route.fulfill({ json: [] }))
 
   // 入出金は状態を持つ。打った明細が一覧に出ることを見たいため。
   await page.route('**/api/transactions**', async (route) => {
@@ -157,6 +160,7 @@ test('画面を切り替えられる', async ({ page }) => {
   for (const label of [
     '口座',
     '入出金',
+    '定期',
     '貸し借り',
     'ウィッシュ',
     '月次収支',

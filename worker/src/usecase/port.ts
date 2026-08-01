@@ -8,6 +8,7 @@ import type { Account } from '../domain/account'
 import type { Loan } from '../domain/loan'
 import type { Money } from '../domain/money'
 import type { MonthlyBalance } from '../domain/monthlyBalance'
+import type { RecurringEntry } from '../domain/recurring'
 import { toInstant, type Instant } from '../domain/time'
 import type { Transaction } from '../domain/transaction'
 import type { Wish, WishStatus } from '../domain/wish'
@@ -92,6 +93,20 @@ export interface LoanRepository {
   delete(id: string): Promise<void>
 }
 
+export interface RecurringRepository {
+  /** 名称順。件数が少ないため絞り込みは持たない。 */
+  list(): Promise<RecurringEntry[]>
+  get(id: string): Promise<RecurringEntry>
+  create(e: RecurringEntry): Promise<void>
+  /**
+   * 削除する。適用済みの履歴（`recurring_applied`）は消さない。
+   *
+   * `transactions.ref_id` に外部キーは無い（参照先が複数の表にまたがるため）。
+   * 消したあとも履歴は残り、名称は `note` に写してあるので読める。
+   */
+  delete(id: string): Promise<void>
+}
+
 export interface WishRepository {
   /** status が null なら全件を返す。 */
   list(status: WishStatus | null): Promise<Wish[]>
@@ -151,6 +166,11 @@ export type WriteOperation =
   | { kind: 'updateAccount'; account: Account; expectedBalance: Money }
   | { kind: 'createTransaction'; transaction: Transaction }
   | { kind: 'deleteTransaction'; transaction: Transaction }
+  | {
+      kind: 'updateRecurringApplied'
+      entry: RecurringEntry
+      expectedAppliedThrough: string
+    }
 
 export interface AtomicWriter {
   /**

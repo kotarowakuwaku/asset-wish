@@ -14,6 +14,7 @@ import {
   dashboardResponse,
   loanResponse,
   monthlySummaryResponse,
+  recurringEntryResponse,
   transactionResponse,
   wishResponse,
 } from './dto'
@@ -21,6 +22,7 @@ import {
   parseUuid,
   readBody,
   readDate,
+  readInteger,
   readMoney,
   readNullableDate,
   readOptionalInteger,
@@ -241,6 +243,52 @@ export function createApp(deps: Deps) {
 
   app.delete('/api/wishes/:id', async (c) => {
     await deps.wishes.delete(parseUuid(c.req.param('id'), 'id'))
+    return c.body(null, 204)
+  })
+
+  // ---- 定期入出金 ----
+
+  app.get('/api/recurring-entries', async (c) => {
+    const entries = await deps.recurring.list()
+    return c.json(entries.map(recurringEntryResponse))
+  })
+
+  /**
+   * 定期入出金を登録する。**この時点では口座を触らない。**
+   *
+   * amount は符号付き。給料は正、家賃は負。入出金の明細と同じ約束にしてある。
+   * 適用の起点は登録した月で、当月の適用日をすでに過ぎていれば次の適用で
+   * 当月分が入る。0 と範囲外の適用日は 422（domain の判定）。
+   *
+   * appliedThrough は受け取らない。適用の記録はサーバーが持つもので、
+   * クライアントから動かせると二重適用の防止が成り立たなくなる。
+   */
+  app.post('/api/recurring-entries', async (c) => {
+    const body = await readBody(c, ['name', 'accountId', 'amount', 'dayOfMonth'])
+    const e = await deps.recurring.create(
+      readString(body, 'name', ''),
+      readUuid(body, 'accountId'),
+      readMoney(body, 'amount', 0),
+      readInteger(body, 'dayOfMonth', 0),
+    )
+    return c.json(recurringEntryResponse(e), 201)
+  })
+
+  /**
+   * 未適用の分をまとめて適用する。適用した件数を返す。
+   *
+   * **自動では起きない。** 背景で勝手に動かない分、何が起きたかが常に見える
+   * （docs/spec-changes.md 5）。2ヶ月開かなかった場合は2ヶ月分がまとめて入る。
+   * 2つのタブから同時に押せば、2度目は 409 になり残高は二重に動かない。
+   */
+  app.post('/api/recurring-entries/apply', async (c) => {
+    return c.json({ applied: await deps.recurring.apply() })
+  })
+
+  // 適用済みの履歴は消さない。名称は履歴側に写してあるので、消しても
+  // 何だったかは読める。
+  app.delete('/api/recurring-entries/:id', async (c) => {
+    await deps.recurring.delete(parseUuid(c.req.param('id'), 'id'))
     return c.body(null, 204)
   })
 

@@ -8,6 +8,7 @@ import type { Account, AccountKind } from '../../domain/account'
 import type { Loan, LoanDirection } from '../../domain/loan'
 import type { Money } from '../../domain/money'
 import type { MonthlySummary } from '../../domain/monthlySummary'
+import type { RecurringEntry } from '../../domain/recurring'
 import type { IsoDate } from '../../domain/time'
 import type { Transaction } from '../../domain/transaction'
 import type { Wish, WishCategory, WishStatus } from '../../domain/wish'
@@ -56,6 +57,21 @@ export type WishService = {
 
 // 手入力の経路は無い。月次の収支は明細から集計する（docs/spec-changes.md 4）。
 // 同じ数字を明細と月次の2箇所に入れさせないため、書き込みの口ごと消してある。
+// 適用は自動では起きない。件数はダッシュボードに出し、実行は明示的に呼ぶ
+// （docs/spec-changes.md 5）。登録の時点では口座を触らない。
+export type RecurringService = {
+  list(): Promise<RecurringEntry[]>
+  create(
+    name: string,
+    accountId: string,
+    amount: Money,
+    dayOfMonth: number,
+  ): Promise<RecurringEntry>
+  /** 未適用の分をまとめて適用し、件数を返す。 */
+  apply(): Promise<number>
+  delete(id: string): Promise<void>
+}
+
 export type MonthlySummaryService = {
   list(): Promise<MonthlySummary[]>
 }
@@ -77,6 +93,7 @@ export type Deps = {
   loans: LoanService
   wishes: WishService
   summaries: MonthlySummaryService
+  recurring: RecurringService
   transactions: TransactionService
   dashboard: DashboardService
   /**

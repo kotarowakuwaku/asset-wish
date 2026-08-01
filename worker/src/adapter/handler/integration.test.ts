@@ -6,7 +6,7 @@
 
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { givenMonthlyBalance, resetDb } from '../../../test/db'
+import { db, givenMonthlyBalance, resetDb } from '../../../test/db'
 import { authed, jsonRequest, TEST_TOKEN } from '../../../test/stubs'
 import { buildDeps } from '../../index'
 import { createApp } from './app'
@@ -38,6 +38,8 @@ type DashboardBody = {
   breakdown: { cashTotal: number; commitments: number }
   averageSurplus: number
   hasAverageSurplus: boolean
+  pendingRecurringCount: number
+  pendingRecurringTotal: number
   wishes: { id: string; shortfall: number; monthsToReach: number | null }[]
 }
 
@@ -529,6 +531,174 @@ describe('入出金の明細', () => {
     const { body } = await req<DashboardBody>('/api/dashboard')
     expect(body.breakdown.cashTotal).toBe(497_000)
     expect(body.netAsset).toBe(497_000)
+  })
+})
+
+describe('定期入出金', () => {
+  type RecurringBody = { id: string; name: string; amount: number; appliedThrough: string }
+  type ApplyBody = { applied: number }
+
+  async function createRecurring(
+    accountId: string,
+    name: string,
+    amount: number,
+    dayOfMonth: number,
+  ): Promise<RecurringBody> {
+    const { status, body } = await req<RecurringBody>(
+      '/api/recurring-entries',
+      jsonRequest('POST', { name, accountId, amount, dayOfMonth }),
+    )
+    expect(status).toBe(201)
+    return body
+  }
+
+  /** 適用日を過ぎた状態にする。適用済み年月を過去へ巻き戻すのは SQL でしかできない。 */
+  async function rewind(id: string, appliedThrough: string): Promise<void> {
+    await db
+      .prepare('UPDATE recurring_entries SET applied_through = ? WHERE id = ?')
+      .bind(appliedThrough, id)
+      .run()
+  }
+
+  it('登録しただけでは残高が動かない', async () => {
+    const account = await createAccount(500_000)
+
+    const created = await createRecurring(account.id, '給料', 250_000, 25)
+
+    expect(created.amount).toBe(250_000)
+    expect(await balanceOf(account.id)).toBe(500_000)
+    expect((await req<unknown[]>('/api/transactions')).body).toHaveLength(0)
+  })
+
+  it('適用すると残高が動き、履歴が残る', async () => {
+    const account = await createAccount(500_000)
+    const created = await createRecurring(account.id, '給料', 250_000, 1)
+    await rewind(created.id, '2026-05')
+
+    const applied = await req<ApplyBody>('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    // 2026-06 から当月まで。件数は実行時期で変わるので残高との整合だけ見る。
+    expect(applied.status).toBe(200)
+    expect(applied.body.applied).toBeGreaterThanOrEqual(3)
+    expect(await balanceOf(account.id)).toBe(500_000 + 250_000 * applied.body.applied)
+
+    const history = (await req<TransactionBody[]>('/api/transactions')).body
+    expect(history).toHaveLength(applied.body.applied)
+    expect(history[0].kind).toBe('recurring_applied')
+    // 名称を写してあるので、定期入出金を消しても何だったか読める。
+    expect(history[0].note).toBe('給料')
+  })
+
+  it('二度目の適用では何も起きない', async () => {
+    const account = await createAccount(500_000)
+    const created = await createRecurring(account.id, '家賃', -80_000, 1)
+    await rewind(created.id, '2026-06')
+
+    const first = await req<ApplyBody>('/api/recurring-entries/apply', authed({ method: 'POST' }))
+    const balance = await balanceOf(account.id)
+
+    const second = await req<ApplyBody>('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    expect(first.body.applied).toBeGreaterThan(0)
+    expect(second.body.applied).toBe(0)
+    expect(await balanceOf(account.id)).toBe(balance)
+  })
+
+  // 同じ口座への更新が2本並ぶと番人が必ず失敗する。合算して1本にしてある。
+  it('同じ口座への収入と支出をまとめて適用できる', async () => {
+    const account = await createAccount(500_000)
+    const salary = await createRecurring(account.id, '給料', 250_000, 1)
+    const rent = await createRecurring(account.id, '家賃', -80_000, 1)
+    await rewind(salary.id, '2026-06')
+    await rewind(rent.id, '2026-06')
+
+    const applied = await req<ApplyBody>('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    expect(applied.status).toBe(200)
+    const perMonth = applied.body.applied / 2
+    expect(await balanceOf(account.id)).toBe(500_000 + (250_000 - 80_000) * perMonth)
+  })
+
+  // 適用の履歴は生活費の収支そのもの。月次の集計に足す（不変条件2）。
+  it('適用した分は月次の集計に入る', async () => {
+    const account = await createAccount(500_000)
+    const created = await createRecurring(account.id, '給料', 250_000, 1)
+    await rewind(created.id, '2026-06')
+
+    await req('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    const summaries = (await req<{ yearMonth: string; income: number }[]>(
+      '/api/monthly-summaries',
+    )).body
+    const july = summaries.filter((s) => s.yearMonth === '2026-07')[0]
+    expect(july.income).toBe(250_000)
+  })
+
+  // 適用済みの年月と食い違う履歴を残さない。消したいときは定期のほうを消す。
+  it('適用の履歴は削除できない', async () => {
+    const account = await createAccount(500_000)
+    const created = await createRecurring(account.id, '給料', 250_000, 1)
+    await rewind(created.id, '2026-06')
+    await req('/api/recurring-entries/apply', authed({ method: 'POST' }))
+    const [history] = (await req<TransactionBody[]>('/api/transactions')).body
+
+    const res = await req<{ error: { code: string } }>(
+      `/api/transactions/${history.id}`,
+      authed({ method: 'DELETE' }),
+    )
+
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('TRANSACTION_NOT_DELETABLE')
+  })
+
+  it('消しても適用済みの履歴は残る', async () => {
+    const account = await createAccount(500_000)
+    const created = await createRecurring(account.id, '給料', 250_000, 1)
+    await rewind(created.id, '2026-06')
+    await req('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    const res = await req(`/api/recurring-entries/${created.id}`, authed({ method: 'DELETE' }))
+
+    expect(res.status).toBe(204)
+    expect((await req<unknown[]>('/api/recurring-entries')).body).toHaveLength(0)
+    expect((await req<TransactionBody[]>('/api/transactions')).body[0].note).toBe('給料')
+  })
+
+  it('存在しない口座なら 404', async () => {
+    const res = await req(
+      '/api/recurring-entries',
+      jsonRequest('POST', {
+        name: '給料',
+        accountId: '00000000-0000-4000-8000-00000000dead',
+        amount: 250_000,
+        dayOfMonth: 25,
+      }),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  // 適用日の範囲は domain が判定するので 422。400 ではない。
+  it('適用日が範囲外なら 422', async () => {
+    const account = await createAccount(500_000)
+    const res = await req<{ error: { code: string } }>(
+      '/api/recurring-entries',
+      jsonRequest('POST', { name: '給料', accountId: account.id, amount: 250_000, dayOfMonth: 32 }),
+    )
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe('INVALID_DAY_OF_MONTH')
+  })
+
+  it('未適用の件数と合計がダッシュボードに出る', async () => {
+    const account = await createAccount(500_000)
+    const salary = await createRecurring(account.id, '給料', 250_000, 1)
+    await rewind(salary.id, '2026-06')
+
+    const { body } = await req<DashboardBody>('/api/dashboard')
+
+    expect(body.pendingRecurringCount).toBeGreaterThan(0)
+    expect(body.pendingRecurringTotal).toBe(250_000 * body.pendingRecurringCount)
+    // 数えるだけで、残高は動かさない。
+    expect(await balanceOf(account.id)).toBe(500_000)
   })
 })
 

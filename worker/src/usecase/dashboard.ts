@@ -13,7 +13,8 @@ import {
   type OutstandingLoans,
 } from '../domain/netAsset'
 import { summarizeMonths } from '../domain/monthlySummary'
-import { yearMonthOf } from '../domain/time'
+import { pendingApplications, pendingTotal } from '../domain/recurring'
+import { dateOf, yearMonthOf } from '../domain/time'
 import { isTerminalWishStatus, type Wish } from '../domain/wish'
 import { YearMonth } from '../domain/yearMonth'
 import type {
@@ -21,6 +22,7 @@ import type {
   Clock,
   LoanRepository,
   MonthlyBalanceRepository,
+  RecurringRepository,
   TransactionRepository,
   WishRepository,
 } from './port'
@@ -48,6 +50,14 @@ export type Dashboard = {
   outstanding: OutstandingLoans
   /** データが無ければ null（算出不可）。 */
   averageSurplus: Money | null
+  /**
+   * まだ適用していない定期入出金。
+   *
+   * 適用は自動では起きない。**背景で勝手に動かない分、何が起きたかが常に
+   * 見える**（docs/spec-changes.md 5）。ここに件数と金額を出し、適用するかを
+   * 画面で尋ねる。
+   */
+  pendingRecurring: { count: number; total: Money }
   wishes: DashboardWish[]
 }
 
@@ -59,6 +69,8 @@ export class DashboardUsecase {
   // 埋めるためだけに読む（docs/spec-changes.md 4）。
   readonly #transactions: TransactionRepository
   readonly #balances: MonthlyBalanceRepository
+  // 未適用の定期入出金を数えるためだけに読む。ここでは適用しない。
+  readonly #recurring: RecurringRepository
   // 「期限まであと何ヶ月あるか」を出すのに現在の年月が要る。実時刻を直に
   // 読むとテストが月をまたいだ瞬間に落ちる。
   readonly #now: Clock
@@ -69,6 +81,7 @@ export class DashboardUsecase {
     wishes: WishRepository,
     transactions: TransactionRepository,
     balances: MonthlyBalanceRepository,
+    recurring: RecurringRepository,
     now: Clock,
   ) {
     this.#accounts = accounts
@@ -76,6 +89,7 @@ export class DashboardUsecase {
     this.#wishes = wishes
     this.#transactions = transactions
     this.#balances = balances
+    this.#recurring = recurring
     this.#now = now
   }
 
@@ -85,16 +99,19 @@ export class DashboardUsecase {
    * 計算は必ず domain の関数を呼ぶ。ここで式を再実装しない（不変条件8）。
    */
   async get(): Promise<Dashboard> {
-    const [accounts, loans, wishes, transactions, balances] = await Promise.all([
+    const [accounts, loans, wishes, transactions, balances, recurring] = await Promise.all([
       this.#accounts.list(),
       // 未精算のみ。精算済みの貸し借りは返ってくる予定の額に含めない。
       this.#loans.list(true),
       this.#wishes.list(null),
       this.#transactions.listAll(),
       this.#balances.listAll(),
+      this.#recurring.list(),
     ])
 
     const currentMonth = YearMonth.parse(yearMonthOf(this.#now()))
+    // 適用はここでは行わない。件数を出すだけで、実行は明示的な操作に限る。
+    const pending = pendingApplications(recurring, dateOf(this.#now()))
     const breakdown = calculateBreakdown(accounts, wishes)
     const total = netAsset(breakdown)
     // 月次の収支は明細から集計する。当月は終わっていないので平均に含めない。
@@ -130,6 +147,7 @@ export class DashboardUsecase {
       investmentTotal: calculateInvestmentTotal(accounts),
       outstanding: calculateOutstandingLoans(loans),
       averageSurplus: avgSurplus,
+      pendingRecurring: { count: pending.length, total: pendingTotal(pending) },
       wishes: dashboardWishes,
     }
   }

@@ -74,6 +74,9 @@ describe('GET /api/dashboard', () => {
       outstandingBorrowed: 5_000,
       averageSurplus: 60_000,
       hasAverageSurplus: true,
+      // 適用は自動では起きない。件数と金額を出して、実行は画面から明示的に。
+      pendingRecurringCount: 2,
+      pendingRecurringTotal: 170_000,
       wishes: [
         {
           id: TEST_ID,
@@ -102,6 +105,7 @@ describe('GET /api/dashboard', () => {
           investmentTotal: yen(0),
           outstanding: { lent: yen(0), borrowed: yen(0) },
           averageSurplus: null,
+          pendingRecurring: { count: 0, total: yen(0) },
           wishes: [],
         }),
       },
@@ -411,6 +415,85 @@ describe('ウィッシュ', () => {
     )
     expect(res.status).toBe(200)
     expect(deps.calls['wishes.pay']).toEqual([TEST_ID, OTHER_ID, '2026-07-12'])
+  })
+})
+
+describe('定期入出金', () => {
+  it('GET は一覧を返す', async () => {
+    const { status, body } = await call('/api/recurring-entries')
+
+    expect(status).toBe(200)
+    expect(body).toEqual([
+      {
+        id: TEST_ID,
+        name: '給料',
+        accountId: OTHER_ID,
+        amount: 250_000,
+        dayOfMonth: 25,
+        appliedThrough: '2026-07',
+      },
+    ])
+  })
+
+  it('POST は 201 を返し、符号付きの金額をそのまま渡す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request(
+      '/api/recurring-entries',
+      jsonRequest('POST', {
+        name: '家賃',
+        accountId: OTHER_ID,
+        amount: -80_000,
+        dayOfMonth: 27,
+      }),
+    )
+    expect(res.status).toBe(201)
+    expect(deps.calls['recurring.create']).toEqual(['家賃', OTHER_ID, -80_000, 27])
+  })
+
+  // 適用の記録はサーバーが持つ。クライアントから動かせると、二重適用の
+  // 防止が成り立たなくなる。
+  it('POST で appliedThrough を送ると 400', async () => {
+    const { status } = await call(
+      '/api/recurring-entries',
+      jsonRequest('POST', {
+        name: '給料',
+        accountId: OTHER_ID,
+        amount: 250_000,
+        dayOfMonth: 25,
+        appliedThrough: '2020-01',
+      }),
+    )
+    expect(status).toBe(400)
+  })
+
+  it('適用日が整数でなければ 400', async () => {
+    const { status } = await call(
+      '/api/recurring-entries',
+      jsonRequest('POST', {
+        name: '給料',
+        accountId: OTHER_ID,
+        amount: 250_000,
+        dayOfMonth: 25.5,
+      }),
+    )
+    expect(status).toBe(400)
+  })
+
+  it('適用は件数を返す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request('/api/recurring-entries/apply', authed({ method: 'POST' }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ applied: 2 })
+    expect(deps.calls['recurring.apply']).toEqual([])
+  })
+
+  it('DELETE は 204 を返す', async () => {
+    const { app, deps } = makeApp()
+    const res = await app.request(`/api/recurring-entries/${TEST_ID}`, authed({ method: 'DELETE' }))
+
+    expect(res.status).toBe(204)
+    expect(deps.calls['recurring.delete']).toEqual([TEST_ID])
   })
 })
 

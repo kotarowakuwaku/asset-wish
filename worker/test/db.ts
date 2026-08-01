@@ -19,10 +19,17 @@ import { id, isoDateOf, SOME_DATE, SOME_INSTANT, yen } from './support'
 
 export const db = env.DB
 
-/** 全テーブルを空にする。外部キーがあるため transactions を先に消す。 */
+/**
+ * 全テーブルを空にする。
+ *
+ * **accounts を参照している表を先に消す。** transactions と
+ * recurring_entries が該当する（どちらも ON DELETE RESTRICT）。
+ * 順番を間違えると FOREIGN KEY constraint failed で落ちる。
+ */
 export async function resetDb(): Promise<void> {
   await db.batch([
     db.prepare('DELETE FROM transactions'),
+    db.prepare('DELETE FROM recurring_entries'),
     db.prepare('DELETE FROM loans'),
     db.prepare('DELETE FROM wishes'),
     db.prepare('DELETE FROM monthly_balances'),

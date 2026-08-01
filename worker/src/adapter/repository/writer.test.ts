@@ -2,8 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { countRows, db, givenAccount, givenLoan, givenWish, rawBalance, resetDb } from '../../../test/db'
 import { id, instantOf, SOME_DATE, yen } from '../../../test/support'
 import { Loan } from '../../domain/loan'
+import { RecurringEntry } from '../../domain/recurring'
 import { Transaction } from '../../domain/transaction'
 import { isConflictError, type WriteOperation } from '../../usecase/port'
+import { YearMonth } from '../../domain/yearMonth'
+import { D1RecurringRepository } from './recurring'
 import { D1AtomicWriter } from './writer'
 
 const writer = new D1AtomicWriter(db)
@@ -212,5 +215,94 @@ describe('前提条件が無い場合', () => {
   it('空なら何もしない', async () => {
     await writer.writeAll([])
     expect(await countRows('loans')).toBe(0)
+  })
+})
+
+// 定期入出金の適用。口座残高・履歴・適用済み年月の3つが同じ batch に載る。
+// 途中で切れると、残高だけ動いて「適用済み」にならず、次に開いたときに
+// 二重に適用される。
+describe('定期入出金の適用', () => {
+  async function givenRecurring(appliedThrough: string, accountId: string) {
+    const e = RecurringEntry.restore(
+      id(),
+      '給料',
+      accountId,
+      yen(250_000),
+      25,
+      YearMonth.parse(appliedThrough),
+    )
+    await new D1RecurringRepository(db).create(e)
+    return e
+  }
+
+  function opsFor(account: Awaited<ReturnType<typeof givenAccount>>, entry: RecurringEntry) {
+    const expectedBalance = account.balance
+    const expectedAppliedThrough = entry.appliedThrough.toString()
+    account.applyDelta(yen(250_000), LATER)
+    entry.markAppliedThrough(YearMonth.of(2026, 8))
+    return [
+      {
+        kind: 'createTransaction' as const,
+        transaction: Transaction.create(
+          id(),
+          account.id,
+          yen(250_000),
+          'recurring_applied',
+          entry.id,
+          SOME_DATE,
+          '給料',
+        ),
+      },
+      { kind: 'updateRecurringApplied' as const, entry, expectedAppliedThrough },
+      { kind: 'updateAccount' as const, account, expectedBalance },
+    ]
+  }
+
+  it('前提が満たされていれば3件すべて書かれる', async () => {
+    const account = await givenAccount({ balance: 500_000 })
+    const entry = await givenRecurring('2026-07', account.id)
+
+    await writer.writeAll(opsFor(account, entry))
+
+    expect(await rawBalance(account.id)).toBe(750_000)
+    expect(await countRows('transactions')).toBe(1)
+    const row = await db
+      .prepare('SELECT applied_through FROM recurring_entries')
+      .first<{ applied_through: string }>()
+    expect(row?.applied_through).toBe('2026-08')
+  })
+
+  // 2つのタブから同時に適用した場合。番人が0件なら以降の文はすべて素通りする。
+  it('適用済み年月が動いていれば競合になり、1件も書かれない', async () => {
+    const account = await givenAccount({ balance: 500_000 })
+    const entry = await givenRecurring('2026-07', account.id)
+    const ops = opsFor(account, entry)
+
+    // 別の操作が先に適用を終えた状態にする。
+    await db
+      .prepare("UPDATE recurring_entries SET applied_through = '2026-08' WHERE id = ?")
+      .bind(entry.id)
+      .run()
+
+    await expectConflict(ops)
+
+    expect(await rawBalance(account.id)).toBe(500_000)
+    expect(await countRows('transactions')).toBe(0)
+  })
+
+  it('残高が動いていれば競合になり、1件も書かれない', async () => {
+    const account = await givenAccount({ balance: 500_000 })
+    const entry = await givenRecurring('2026-07', account.id)
+    const ops = opsFor(account, entry)
+
+    await db.prepare('UPDATE accounts SET balance = 499_000 WHERE id = ?').bind(account.id).run()
+
+    await expectConflict(ops)
+
+    expect(await countRows('transactions')).toBe(0)
+    const row = await db
+      .prepare('SELECT applied_through FROM recurring_entries')
+      .first<{ applied_through: string }>()
+    expect(row?.applied_through).toBe('2026-07')
   })
 })

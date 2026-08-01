@@ -8,6 +8,7 @@
 import { STALE_BALANCE_THRESHOLD_MS, type Account } from '../../domain/account'
 import type { Loan } from '../../domain/loan'
 import type { MonthlySummary } from '../../domain/monthlySummary'
+import type { RecurringEntry } from '../../domain/recurring'
 import type { Instant } from '../../domain/time'
 import type { Transaction } from '../../domain/transaction'
 import type { Wish } from '../../domain/wish'
@@ -73,6 +74,19 @@ export function monthlySummaryResponse(s: MonthlySummary) {
   }
 }
 
+export function recurringEntryResponse(e: RecurringEntry) {
+  return {
+    id: e.id,
+    name: e.name,
+    accountId: e.accountId,
+    // 符号付き。給料は正、家賃は負。入出金の明細と同じ約束。
+    amount: e.amount,
+    dayOfMonth: e.dayOfMonth,
+    // この年月までは適用済み。次に適用するのはこの翌月から。
+    appliedThrough: e.appliedThrough.toString(),
+  }
+}
+
 export function transactionResponse(t: Transaction) {
   return {
     id: t.id,
@@ -104,6 +118,10 @@ export function dashboardResponse(d: Dashboard) {
     // クライアントは表示しない。
     averageSurplus: d.averageSurplus ?? 0,
     hasAverageSurplus: d.averageSurplus !== null,
+    // まだ適用していない定期入出金。適用は自動では起きないので、件数を
+    // 出して画面から明示的に実行させる。合計は符号付き（収入と支出が相殺）。
+    pendingRecurringCount: d.pendingRecurring.count,
+    pendingRecurringTotal: d.pendingRecurring.total,
     wishes: d.wishes.map((w) => ({
       ...wishResponse(w.wish),
       shortfall: w.shortfall,

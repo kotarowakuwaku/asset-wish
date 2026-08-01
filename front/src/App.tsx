@@ -7,6 +7,7 @@ import { Accounts } from './screens/Accounts'
 import { Dashboard } from './screens/Dashboard'
 import { Loans } from './screens/Loans'
 import { MonthlySummaries } from './screens/MonthlySummaries'
+import { Recurring } from './screens/Recurring'
 import { Transactions } from './screens/Transactions'
 import { Wishes } from './screens/Wishes'
 
@@ -71,6 +72,7 @@ function App() {
         {route === 'dashboard' && <Dashboard client={client} />}
         {route === 'accounts' && <Accounts client={client} />}
         {route === 'transactions' && <Transactions client={client} />}
+        {route === 'recurring' && <Recurring client={client} />}
         {route === 'loans' && <Loans client={client} />}
         {route === 'wishes' && <Wishes client={client} />}
         {route === 'monthly-summaries' && <MonthlySummaries client={client} />}

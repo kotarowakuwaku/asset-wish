@@ -9,6 +9,7 @@ import { Account } from '../src/domain/account'
 import { Loan, type LoanDirection } from '../src/domain/loan'
 import { money } from '../src/domain/money'
 import { MonthlySummary, type MonthlySource } from '../src/domain/monthlySummary'
+import { RecurringEntry } from '../src/domain/recurring'
 import { Transaction } from '../src/domain/transaction'
 import { Wish } from '../src/domain/wish'
 import { YearMonth } from '../src/domain/yearMonth'
@@ -55,6 +56,10 @@ export function aWish(overrides: { status?: string; deadline?: string | null } =
   })
 }
 
+export function aRecurringEntry(): RecurringEntry {
+  return RecurringEntry.restore(TEST_ID, '給料', OTHER_ID, yen(250_000), 25, YearMonth.of(2026, 7))
+}
+
 export function aMonthlySummary(source: MonthlySource = 'entries'): MonthlySummary {
   return MonthlySummary.of(YearMonth.of(2026, 7), yen(300_000), yen(230_000), source)
 }
@@ -91,6 +96,7 @@ export function aDashboard(): Dashboard {
     investmentTotal: yen(350_000),
     outstanding: { lent: yen(12_000), borrowed: yen(5_000) },
     averageSurplus: yen(60_000),
+    pendingRecurring: { count: 2, total: yen(170_000) },
     wishes: [
       { wish: aWish(), shortfall: yen(358_000), monthsToReach: 6, monthlySavingNeeded: yen(59_667) },
     ],
@@ -139,6 +145,12 @@ export function stubDeps(overrides: Partial<Deps> = {}): Deps & { calls: Calls }
     },
     summaries: {
       list: record('summaries.list', () => [aMonthlySummary()]),
+    },
+    recurring: {
+      list: record('recurring.list', () => [aRecurringEntry()]),
+      create: record('recurring.create', () => aRecurringEntry()),
+      apply: record('recurring.apply', () => 2),
+      delete: record('recurring.delete', () => undefined),
     },
     transactions: {
       list: record('transactions.list', () => [aTransaction()]),

@@ -7,6 +7,7 @@
 import { Account } from '../src/domain/account'
 import { Loan } from '../src/domain/loan'
 import { MonthlyBalance } from '../src/domain/monthlyBalance'
+import { RecurringEntry } from '../src/domain/recurring'
 import { Transaction } from '../src/domain/transaction'
 import { Wish, type WishStatus } from '../src/domain/wish'
 import {
@@ -18,6 +19,7 @@ import {
   type IDGenerator,
   type LoanRepository,
   type MonthlyBalanceRepository,
+  type RecurringRepository,
   type TransactionRepository,
   type WishRepository,
   type WriteOperation,
@@ -38,6 +40,10 @@ function copyLoan(l: Loan): Loan {
     l.settledAmount,
     l.occurredOn,
   )
+}
+
+function copyRecurring(e: RecurringEntry): RecurringEntry {
+  return RecurringEntry.restore(e.id, e.name, e.accountId, e.amount, e.dayOfMonth, e.appliedThrough)
 }
 
 function copyWish(w: Wish): Wish {
@@ -176,6 +182,34 @@ export class FakeMonthlyBalanceRepository implements MonthlyBalanceRepository {
   }
 }
 
+export class FakeRecurringRepository implements RecurringRepository {
+  readonly items = new Map<string, RecurringEntry>()
+
+  seed(...entries: RecurringEntry[]): void {
+    for (const e of entries) this.items.set(e.id, copyRecurring(e))
+  }
+
+  async list(): Promise<RecurringEntry[]> {
+    return [...this.items.values()]
+      .map(copyRecurring)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  async get(id: string): Promise<RecurringEntry> {
+    const e = this.items.get(id)
+    if (e === undefined) throw new NotFoundError('定期入出金')
+    return copyRecurring(e)
+  }
+
+  async create(e: RecurringEntry): Promise<void> {
+    this.items.set(e.id, copyRecurring(e))
+  }
+
+  async delete(id: string): Promise<void> {
+    this.items.delete(id)
+  }
+}
+
 export class FakeTransactionRepository implements TransactionRepository {
   readonly items: Transaction[] = []
 
@@ -212,17 +246,20 @@ export class FakeAtomicWriter implements AtomicWriter {
   readonly #loans: FakeLoanRepository
   readonly #wishes: FakeWishRepository
   readonly #transactions: FakeTransactionRepository
+  readonly #recurring: FakeRecurringRepository
 
   constructor(
     accounts: FakeAccountRepository,
     loans: FakeLoanRepository,
     wishes: FakeWishRepository,
     transactions: FakeTransactionRepository,
+    recurring: FakeRecurringRepository,
   ) {
     this.#accounts = accounts
     this.#loans = loans
     this.#wishes = wishes
     this.#transactions = transactions
+    this.#recurring = recurring
   }
 
   async writeAll(ops: readonly WriteOperation[]): Promise<void> {
@@ -241,6 +278,11 @@ export class FakeAtomicWriter implements AtomicWriter {
         return this.#loans.items.get(op.loan.id)?.settledAmount === op.expectedSettledAmount
       case 'updateWishStatus':
         return this.#wishes.items.get(op.wish.id)?.status === op.expectedStatus
+      case 'updateRecurringApplied':
+        return (
+          this.#recurring.items.get(op.entry.id)?.appliedThrough.toString() ===
+          op.expectedAppliedThrough
+        )
       case 'createLoan':
       case 'createTransaction':
       case 'deleteTransaction':
@@ -270,6 +312,9 @@ export class FakeAtomicWriter implements AtomicWriter {
         if (at !== -1) this.#transactions.items.splice(at, 1)
         return
       }
+      case 'updateRecurringApplied':
+        this.#recurring.seed(op.entry)
+        return
     }
   }
 }
@@ -281,8 +326,9 @@ export function newFakes() {
   const wishes = new FakeWishRepository()
   const balances = new FakeMonthlyBalanceRepository()
   const transactions = new FakeTransactionRepository()
-  const writer = new FakeAtomicWriter(accounts, loans, wishes, transactions)
-  return { accounts, loans, wishes, balances, transactions, writer }
+  const recurring = new FakeRecurringRepository()
+  const writer = new FakeAtomicWriter(accounts, loans, wishes, transactions, recurring)
+  return { accounts, loans, wishes, balances, transactions, recurring, writer }
 }
 
 /** 時刻を固定する。実時刻に依存したテストは日付をまたいだ瞬間に落ちる。 */
