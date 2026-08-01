@@ -1,4 +1,5 @@
 import { domainError } from './errors'
+import type { IsoDate } from './time'
 
 const MIN_YEAR = 1900
 const MAX_YEAR = 9999
@@ -16,8 +17,8 @@ function isLeapYear(year: number): boolean {
  * 生成経路はコンストラクタだけなので、Go 版にあった IsZero()（ゼロ値の検出）は
  * 移植していない。型が「必ず検証を通っている」ことを保証する。
  *
- * FirstDay() も移植していない。DATE 列との変換専用のメソッドであり、
- * year_month を TEXT 'YYYY-MM' にした時点で変換先が消えた
+ * firstDay() は一度落としたが、見込み残高の「翌月1日時点」を出すために
+ * 戻した。DATE 列との変換のためではなく、**期間の境界を表す日付**として使う
  *（docs/architecture.md 5章）。
  */
 export class YearMonth {
@@ -73,6 +74,17 @@ export class YearMonth {
    */
   monthsUntil(other: YearMonth): number {
     return (other.year - this.year) * 12 + (other.month - this.month)
+  }
+
+  /**
+   * その月の1日を返す。
+   *
+   * 「翌月1日時点でいくらか」のように、**期間の境界**を表すのに使う。
+   * 月末は `daysInMonth()` と組み合わせて出せるが、境界として要るのは
+   * 今のところ1日だけなので `lastDay()` は置かない。
+   */
+  firstDay(): IsoDate {
+    return `${this.toString()}-01` as IsoDate
   }
 
   /**
